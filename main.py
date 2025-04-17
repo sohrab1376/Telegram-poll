@@ -137,9 +137,14 @@ async def get_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = json.load(f)
 
     message = "نتایج ثبت‌شده:"
-    for uid, info in data.items():
-    message += f"کاربر: {info['username']} | ID: {uid} | نظام پزشکی: {info['medical_number']}\n"
-    for i, a in enumerate(info["answers"].values()):
+message = ""
+
+for uid, info in data.items():
+    username = info.get("username", "نامشخص")
+    medical_number = info.get("medical_number", "نامشخص")
+    message += f"کاربر: {username} | ID: {uid} | نظام پزشکی: {medical_number}\n"
+
+    for i, a in enumerate(info.get("answers", {}).values()):
         message += f"سوال {i+1}: {a}\n"
     message += "------\n"
 
