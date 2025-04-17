@@ -136,7 +136,7 @@ async def get_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    message = "نتایج ثبت‌شده:
+    message = "نتایج ثبت‌شده:"
 
 "
     for uid, info in data.items():
