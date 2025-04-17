@@ -136,17 +136,12 @@ async def get_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    message = "نتایج ثبت‌شده:
-
-"
+    message = "نتایج ثبت‌شده:\n\n"
     for uid, info in data.items():
-        message += f"کاربر: {info['username']} | ID: {uid} | نظام پزشکی: {info['medical_number']}
-"
+        message += f"کاربر: {info['username']} | ID: {uid} | نظام پزشکی: {info['medical_number']}\n"
         for i, a in enumerate(info["answers"].values()):
-            message += f"سوال {i+1}: {a}
-"
-        message += "------
-"
+            message += f"سوال {i+1}: {a}\n"
+        message += "------\n"
 
     await update.message.reply_text(message)
 
