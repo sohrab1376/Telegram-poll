@@ -69,7 +69,7 @@ QUESTIONS = [
 OPTIONS = [
     [("بله", "yes"), ("خیر", "no")],
     [("بله", "yes"), ("خیر", "no")],
-    [("طرح اجباری", "mandatory_plan"), ("خدمت اجباری", "mandatory_service"), ("هنوز طرح یا خدمت اجباری را شروع نکردم", "not_started"), ("طرح یا خدمت اجباری را قبلا سپری کردم", "completed")],
+    [("طرح اجباری", "opt1"), ("خدمت اجباری", "opt2"), ("هنوز طرح یا خدمت اجباری را شروع نکردم", "opt3"), ("طرح یا خدمت اجباری را قبلا سپری کردم", "opt4")],
     [("بله", "yes"), ("خیر", "no")],
     [("درمانگاه خصوصی کمتر از 10 شیفت", "private_less_10"), ("درمانگاه خصوصی بیشتر از 10 شیفت", "private_more_10"), ("سایر مراکز کمتر از 10 شیفت", "other_less_10"), ("سایر مراکز بیشتر از 10 شیفت", "other_more_10"), ("خیر", "no")],
     [("بله", "yes"), ("خیر", "no")],
@@ -148,7 +148,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 break
         else:
             logger.error(f"Invalid callback_data for question {index} from user {user.id}: {answer}")
-            await query.message.reply_text("گزینه نامعتبر. لطفاً دوباره سعی کنید.")
+            await query.message.reply_text(f"گزینه انتخاب‌شده برای سوال {index+1} نامعتبر است. لطفاً یکی از گزینه‌های نمایش‌داده‌شده را انتخاب کنید.")
             return
 
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
