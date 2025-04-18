@@ -51,7 +51,7 @@ except sqlite3.OperationalError:
     pass
 conn.commit()
 
-# لیست سوالات (تمیز شده)
+# لیست سوالات
 QUESTIONS = [
     "سوال 1_همکار گرامی آیا با روند پرداختی های فعلی دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را در شان یک پزشک ممکن میدانید",
     "سوال 2_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید",
@@ -125,7 +125,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
-        await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
+        await (update.message or update.callback_query.message).reply_text('جهت احراز صلاحیت شرکت در نظرسنجی، احتراما شماره نظام پزشکی خود را وارد نمایید')
 
 # دریافت پاسخ
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
