@@ -122,6 +122,32 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     conn.commit()
     await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
 
+# تابع برای نمایش نتایج (فقط برای ادمین)
+async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = 130742264  # آیدی تلگرام تو
+    if update.message.from_user.id != admin_id:
+        await update.message.reply_text("فقط ادمین می‌تونه نتایج رو ببینه!")
+        return
+
+    cursor.execute('SELECT * FROM responses')
+    rows = cursor.fetchall()
+    if not rows:
+        await update.message.reply_text("هیچ پاسخی ثبت نشده.")
+        return
+
+    response_text = "نتایج نظرسنجی:\n"
+    for row in rows:
+        response_text += f"کاربر: @{row[1]} (ID: {row[0]})\n"
+        for i in range(1, 11):
+            response_text += f"سوال {i}: {row[i+1]}\n"
+        response_text += f"شماره نظام پزشکی: {row[12]}\n\n"
+        if len(response_text) > 3000:  # جلوگیری از محدودیت طول پیام
+            await update.message.reply_text(response_text)
+            response_text = ""
+
+    if response_text:
+        await update.message.reply_text(response_text)
+
 # تابع مدیریت درخواست‌های وب‌هوک
 async def webhook(request):
     app = request.app['telegram_app']
@@ -131,6 +157,11 @@ async def webhook(request):
 
 # تابع اصلی
 async def main():
+    # بررسی توکن
+    if not TOKEN:
+        logger.error("No TOKEN provided in environment variables")
+        return
+
     # تنظیم ربات تلگرام
     app = Application.builder().token(TOKEN).build()
 
@@ -138,6 +169,7 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_response))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_id))
+    app.add_handler(CommandHandler("results", results))  # هندلر برای دستور results
 
     # تنظیم سرور aiohttp
     web_app = web.Application()
