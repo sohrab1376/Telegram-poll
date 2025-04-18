@@ -1,164 +1,160 @@
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
-import json
 import os
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, ContextTypes
+import sqlite3
+from aiohttp import web
 
+# تنظیمات لاگ
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# خواندن توکن و پورت از متغیرهای محیطی
+TOKEN = os.getenv('TOKEN')
+PORT = int(os.getenv('PORT', '10000'))  # پورت پیش‌فرض 10000 برای Render
+
+# اتصال به دیتابیس SQLite
+conn = sqlite3.connect('survey.db', check_same_thread=False)
+cursor = conn.cursor()
+
+# ایجاد جدول برای ذخیره پاسخ‌ها
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS responses (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    q1 TEXT,
+    q2 TEXT,
+    q3 TEXT,
+    q4 TEXT,
+    q5 TEXT,
+    q6 TEXT,
+    q7 TEXT,
+    q8 TEXT,
+    q9 TEXT,
+    q10 TEXT,
+    medical_id TEXT
+)
+''')
+conn.commit()
+
+# لیست سوالات
 QUESTIONS = [
-    {
-        "text": "سوال ۱_آیا با روند پرداختی های فعلی، دستیابی به اهداف زندگی خود را ممکن می‌دانید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۲_آیا روند پرداختی درمانگاه‌ها را نامناسب می‌دانید و حاضر به همکاری هستید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۳_در حال حاضر مشغول کدام هستید؟",
-        "options": ["طرح اجباری", "خدمت اجباری", "شروع نکردم", "قبلاً گذرانده‌ام"]
-    },
-    {
-        "text": "سوال ۴_آیا پروانه طبابت فعال، موقت یا نامه عدم نیاز دارید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۵_آیا طی ماه گذشته در درمانگاهی کار کرده‌اید؟",
-        "options": ["خصوصی <10 شیفت", "خصوصی >10 شیفت", "سایر <10", "سایر >10", "خیر"]
-    },
-    {
-        "text": "سوال ۶_آیا با مطالبه کف پرداختی ۴۰۰ت + درصدها موافق هستید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۷_آیا با قطع کامل همکاری تا رسیدن به پرداختی مناسب موافقید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۸_آیا با برنداشتن شیفت در روزهای مشخص موافقید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۹_آیا با قطع همکاری با درمانگاه‌های بدحساب موافقید؟",
-        "options": ["بله", "خیر"]
-    },
-    {
-        "text": "سوال ۱۰_آیا مجبور به پر کردن شیفت‌ها تحت هر شرایطی هستید؟",
-        "options": ["بله", "خیر"]
-    },
+    "سوال ۱_همکار گرامی آیا با روند پرداختی های فعلی، دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را، در شان یک پزشک، ممکن می‌دانید؟",
+    "سوال ۲_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید؟!",
+    "سوال ۳_همکار گرامی در حال حاضر مشغول سپری کردن کدام یک از موارد زیر هستید؟!",
+    "سوال ۴_همکار گرامی آیا در حال حاضر پروانه طبابت فعال، پروانه موقت و یا نامه عدم نیاز در ساعات غیر اداری در اختیار دارید؟!",
+    "سوال ۵_همکار گرامی آیا طی یک ماهه گذشته در درمانگاهی مشغول به کار بوده اید؟",
+    "سوال ۶_همکار گرامی آیا با مطالبه «کف پرداختی ساعتی ۴۰۰ ت همراه با ۲۵ درصد خدمات و ۵۰ درصد پروسیژر» و یا «پرکیس معادل کا حرفه ای درصورت ویزیت میانگین بیشتر از ۴ بیمار در ساعت» و عدم پذیرش همکاری با نرخ کمتر از این مقدار به صورت علل حساب تا زمان حصول یک فرمول جامع موافق هستید؟!",
+    "سوال ۷_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع کامل هرگونه همکاری با درمانگاهداران و عدم تمدید قرارداد تا حصول پرداختی قابل قبول\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۸_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"برنداشتن شیفت، خالی گذاشتن و کاور نکردن آن ها فقط در روز های مشخصی از هر ماه\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۹_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع هرگونه همکاری و عدم تمدید قرارداد با تعداد مشخصی از درمانگاه های بدحساب\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۱۰_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده؟!"
 ]
 
-RESPONSES_FILE = "responses.json"
-user_answers = {}
-awaiting_medical_number = {}
+# گزینه‌های هر سوال
+OPTIONS = [
+    ["بله", "خیر"],
+    ["بله", "خیر"],
+    ["طرح اجباری", "خدمت اجباری", "هنوز طرح یا خدمت اجباری را شروع نکردم", "طرح یا خدمت اجباری را قبلا سپری کردم"],
+    ["بله", "خیر"],
+    ["درمانگاه خصوصی کمتر از 10 شیفت", "درمانگاه خصوصی بیشتر از 10 شیفت", "سایر مراکز کمتر از 10 شیفت", "سایر مراکز بیشتر از 10 شیفت", "خیر"],
+    ["بله", "خیر"],
+    ["بله", "خیر"],
+    ["بله", "خیر"],
+    ["بله", "خیر"],
+    ["بله", "خیر"]
+]
 
-def save_response(user_id, username, medical_number, answers):
-    if os.path.exists(RESPONSES_FILE):
-        with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {}
+# تابع شروع نظرسنجی
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.message.from_user
+    cursor.execute('SELECT * FROM responses WHERE user_id = ?', (user.id,))
+    if cursor.fetchone():
+        await update.message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.')
+        return
+    context.user_data['question_index'] = 0
+    await ask_question(update, context)
 
-    data[str(user_id)] = {
-        "username": username,
-        "medical_number": medical_number,
-        "answers": answers
-    }
-
-    with open(RESPONSES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_answers[user_id] = {}
-
-    keyboard = []
-    for i, q in enumerate(QUESTIONS):
-        row = [InlineKeyboardButton(text=opt, callback_data=f"{i}:{opt}") for opt in q["options"]]
-        keyboard.append([InlineKeyboardButton(f"--- {q['text']} ---", callback_data="ignore")])
-        keyboard.extend([[b] for b in row])
-        keyboard.append([InlineKeyboardButton(" ", callback_data="ignore")])
-
-    keyboard.append([InlineKeyboardButton("ثبت پاسخ‌ها", callback_data="submit")])
-    await update.message.reply_text("لطفاً به سوالات زیر پاسخ دهید:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    username = query.from_user.username or "ندارد"
-    data = query.data
-
-    if data == "submit":
-        answers = user_answers.get(user_id, {})
-        if len(answers) < len(QUESTIONS):
-            await query.message.reply_text("لطفاً به **همه سوالات** پاسخ دهید.")
+# تابع ارسال سوال
+async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    index = context.user_data['question_index']
+    if index < len(QUESTIONS):
+        question = QUESTIONS[index]
+        options = OPTIONS[index]
+        keyboard = [[InlineKeyboardButton(option, callback_data=f"{index}_{option}")] for option in options]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.message:
+            await update.message.reply_text(question, reply_markup=reply_markup)
         else:
-            awaiting_medical_number[user_id] = True
-            await query.message.reply_text("لطفاً برای ثبت نهایی، شماره نظام پزشکی خود را وارد کنید:")
-    elif ":" in data:
-        q_index, answer = data.split(":", 1)
-        user_answers[user_id][int(q_index)] = answer
-        await query.message.reply_text(f"پاسخ شما به سوال {int(q_index)+1} ثبت شد: {answer}")
+            await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+    else:
+        await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
-async def handle_medical_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if awaiting_medical_number.get(user_id):
-        context.user_data["medical_number"] = update.message.text
-        keyboard = [[InlineKeyboardButton("تایید و ثبت نهایی", callback_data="final_submit")]]
-        await update.message.reply_text("شماره ثبت شد. برای تایید نهایی، روی دکمه زیر بزنید:",
-                                        reply_markup=InlineKeyboardMarkup(keyboard))
-        awaiting_medical_number[user_id] = False
-
-async def final_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# تابع دریافت پاسخ سوالات
+async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    data = query.data.split('_')
+    index = int(data[0])
+    answer = data[1]
+    user = query.from_user
 
-    user_id = query.from_user.id
-    username = query.from_user.username or "ندارد"
-    answers = user_answers.get(user_id, {})
-    medical_number = context.user_data.get("medical_number", "ثبت نشده")
+    cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+    cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+    conn.commit()
 
-    save_response(user_id, username, medical_number, answers)
-    await query.message.reply_text("نظرات شما ثبت شد. با تشکر از همکاری شما")
+    context.user_data['question_index'] += 1
+    await ask_question(update, context)
 
-async def get_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_admins = await context.bot.get_chat_administrators(update.effective_chat.id)
-    admin_ids = [admin.user.id for admin in chat_admins]
+# تابع دریافت شماره نظام پزشکی
+async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.message.from_user
+    medical_id = update.message.text
+    cursor.execute('UPDATE responses SET medical_id = ? WHERE user_id = ?', (medical_id, user.id))
+    conn.commit()
+    await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
 
-    if update.effective_user.id not in admin_ids:
-        await update.message.reply_text("فقط ادمین‌ها می‌توانند نتیجه را ببینند.")
-        return
+# تابع مدیریت درخواست‌های وب‌هوک
+async def webhook(request):
+    app = request.app['telegram_app']
+    update = Update.de_json(await request.json(), app.bot)
+    await app.process_update(update)
+    return web.Response()
 
-    if not os.path.exists(RESPONSES_FILE):
-        await update.message.reply_text("هنوز پاسخی ثبت نشده.")
-        return
+# تابع اصلی
+async def main():
+    # تنظیم ربات تلگرام
+    app = Application.builder().token(TOKEN).build()
 
-    with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    message = "نتایج ثبت‌شده:\n"
-
-    for uid, info in data.items():
-        username = info.get("username", "نامشخص")
-        medical_number = info.get("medical_number", "نامشخص")
-        message += f"کاربر: {username} | ID: {uid} | نظام پزشکی: {medical_number}\n"
-
-        for i, a in enumerate(info.get("answers", {}).values()):
-            message += f"سوال {i+1}: {a}\n"
-        message += "------\n"
-
-    await update.message.reply_text(message)
-
-if __name__ == "__main__":
-    import os
-    TOKEN = os.getenv("BOT_TOKEN")
-    app = ApplicationBuilder().token(TOKEN).build()
-
+    # ثبت هندلرها
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("results", get_results))  # اصلاح شده
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(CallbackQueryHandler(final_submit, pattern="final_submit"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_number))
+    app.add_handler(CallbackQueryHandler(handle_response))
+    app.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_medical_id))
 
-    print("Bot is running...")
-    app.run_polling()
+    # تنظیم سرور aiohttp
+    web_app = web.Application()
+    web_app['telegram_app'] = app
+    web_app.router.add_post('/', webhook)
+
+    # راه‌اندازی سرور
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+
+    # تنظیم وب‌هوک تلگرام
+    await app.initialize()
+    await app.start()
+    await app.updater.start_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="/",
+        webhook_url="https://telegram-poll.onrender.com/"
+    )
+
+    logger.info(f"Bot started on port {PORT}")
+
+if __name__ == '__main__':
+    import asyncio
+    asyncio.run(main())
