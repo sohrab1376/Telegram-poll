@@ -41,9 +41,14 @@ CREATE TABLE IF NOT EXISTS responses (
     q8 TEXT,
     q9 TEXT,
     q10 TEXT,
-    medical_id TEXT
+    medical_id TEXT,
+    completed INTEGER DEFAULT 0
 )
 ''')
+try:
+    cursor.execute('ALTER TABLE responses ADD COLUMN completed INTEGER DEFAULT 0')
+except sqlite3.OperationalError:
+    pass  # ستون از قبل وجود داره
 conn.commit()
 
 # لیست سوالات
@@ -74,28 +79,46 @@ OPTIONS = [
     ["بله", "خیر"]
 ]
 
+# تابع بررسی تکمیل نظرسنجی
+async def check_completed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    cursor.execute('SELECT completed FROM responses WHERE user_id = ?', (user.id,))
+    result = cursor.fetchone()
+    if result and result[0] == 1:
+        await update.effective_message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.')
+        return True
+    return False
+
 # تابع شروع نظرسنجی
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await check_completed(update, context):
+        return
     user = update.message.from_user
     cursor.execute('SELECT * FROM responses WHERE user_id = ?', (user.id,))
-    if cursor.fetchone():
-        await update.message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.')
-        return
+    if not cursor.fetchone():
+        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+        conn.commit()
     context.user_data['question_index'] = 0
     await ask_question(update, context)
 
 # تابع ارسال سوال
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    index = context.user_data['question_index']
+    if await check_completed(update, context):
+        return
+    index = context.user_data.get('question_index', 0)
+    logger.info(f"Asking question {index} for user {update.effective_user.id}")
     if index < len(QUESTIONS):
         question = QUESTIONS[index]
         options = OPTIONS[index]
         keyboard = [[InlineKeyboardButton(option, callback_data=f"{index}_{option}")] for option in options]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        if update.message:
-            await update.message.reply_text(question, reply_markup=reply_markup)
-        else:
-            await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+        try:
+            if update.message:
+                await update.message.reply_text(question, reply_markup=reply_markup)
+            else:
+                await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+        except Exception as e:
+            logger.error(f"Error sending question {index}: {e}")
     else:
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
@@ -103,31 +126,46 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    if await check_completed(update, context):
+        return
     data = query.data.split('_')
     index = int(data[0])
     answer = data[1]
     user = query.from_user
 
+    logger.info(f"Received response for question {index} from user {user.id}: {answer}")
+
+    # ذخیره پاسخ
     cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
     cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
     conn.commit()
 
-    context.user_data['question_index'] += 1
+    # افزایش اندیس سوال
+    context.user_data['question_index'] = index + 1
+    logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
+
+    # نمایش سوال بعدی
     await ask_question(update, context)
 
 # تابع دریافت شماره نظام پزشکی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
-    medical_id = update.message.text
-    cursor.execute('UPDATE responses SET medical_id = ? WHERE user_id = ?', (medical_id, user.id))
-    conn.commit()
-    await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
+    if await check_completed(update, context):
+        return
+    if context.user_data.get('question_index', 0) == len(QUESTIONS):
+        medical_id = update.message.text
+        cursor.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
+        conn.commit()
+        await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
+    else:
+        await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
 
 # تابع برای نمایش نتایج (فقط برای ادمین)
 async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     admin_id = 130742264  # آیدی تلگرام تو
-    if update.message.from_user.id != admin_id:
-        await update.message.reply_text("فقط ادمین می‌تونه نتایج رو ببینه!")
+    user = update.message.from_user
+    if user.id != admin_id:
+        await update.message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.' if await check_completed(update, context) else 'فقط ادمین می‌تونه نتایج رو ببینه!')
         return
 
     cursor.execute('SELECT * FROM responses')
