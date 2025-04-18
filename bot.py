@@ -53,25 +53,25 @@ conn.commit()
 
 # لیست سوالات
 QUESTIONS = [
-    "سوال ۱_آیا با روند پرداختی فعلی، دستیابی به اهداف زندگی ممکنه؟",
-    "سوال ۲_آیا روند پرداختی درمانگاه‌ها رو نامناسب می‌دونید و حاضر به همکاری برای اصلاحید؟",
-    "سوال ۳_در حال حاضر مشغول چه کاری هستید؟",
-    "سوال ۴_آیا پروانه طبابت فعال دارید؟",
-    "سوال ۵_طی یک ماه گذشته در درمانگاهی کار کردید؟",
-    "سوال ۶_آیا با مطالبه کف پرداختی ۴۰۰ ت موافقید؟",
-    "سوال ۷_آیا با قطع همکاری با درمانگاه‌ها تا حصول پرداختی مناسب موافقید؟",
-    "سوال ۸_آیا با خالی گذاشتن شیفت‌ها در روزهای مشخص موافقید؟",
-    "سوال ۹_آیا با قطع همکاری با درمانگاه‌های بدحساب موافقید؟",
-    "سوال ۱۰_آیا مشکلات زندگی شما رو مجبور به پر کردن شیفت‌ها کرده؟"
+    "سوال ۱_همکار گرامی آیا با روند پرداختی های فعلی، دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را، در شان یک پزشک، ممکن می‌دانید؟",
+    "سوال ۲_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید؟!",
+    "سوال ۳_همکار گرامی در حال حاضر مشغول سپری کردن کدام یک از موارد زیر هستید؟!",
+    "سوال ۴_همکار گرامی آیا در حال حاضر پروانه طبابت فعال، پروانه موقت و یا نامه عدم نیاز در ساعات غیر اداری در اختیار دارید؟!",
+    "سوال ۵_همکار گرامی آیا طی یک ماهه گذشته در درمانگاهی مشغول به کار بوده اید؟",
+    "سوال ۶_همکار گرامی آیا با مطالبه «کف پرداختی ساعتی ۴۰۰ ت همراه با ۲۵ درصد خدمات و ۵۰ درصد پروسیژر» و یا «پرکیس معادل کا حرفه ای درصورت ویزیت میانگین بیشتر از ۴ بیمار در ساعت» و عدم پذیرش همکاری با نرخ کمتر از این مقدار به صورت علل حساب تا زمان حصول یک فرمول جامع موافق هستید؟!",
+    "سوال ۷_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع کامل هرگونه همکاری با درمانگاهداران و عدم تمدید قرارداد تا حصول پرداختی قابل قبول\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۸_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"برنداشتن شیفت، خالی گذاشتن و کاور نکردن آن ها فقط در روز های مشخصی از هر ماه\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۹_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع هرگونه همکاری و عدم تمدید قرارداد با تعداد مشخصی از درمانگاه های بدحساب\" با این حرکت اعتراضی همراه خواهید بود؟!",
+    "سوال ۱۰_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده؟!"
 ]
 
-# گزینه‌ها
+# گزینه‌های هر سوال
 OPTIONS = [
     ["بله", "خیر"],
     ["بله", "خیر"],
-    ["طرح اجباری", "خدمت اجباری", "شروع نکردم", "قبلاً سپری کردم"],
+    ["طرح اجباری", "خدمت اجباری", "هنوز طرح یا خدمت اجباری را شروع نکردم", "طرح یا خدمت اجباری را قبلا سپری کردم"],
     ["بله", "خیر"],
-    ["خصوصی <10 شیفت", "خصوصی >10 شیفت", "سایر <10 شیفت", "سایر >10 شیفت", "خیر"],
+    ["درمانگاه خصوصی کمتر از 10 شیفت", "درمانگاه خصوصی بیشتر از 10 شیفت", "سایر مراکز کمتر از 10 شیفت", "سایر مراکز بیشتر از 10 شیفت", "خیر"],
     ["بله", "خیر"],
     ["بله", "خیر"],
     ["بله", "خیر"],
@@ -99,6 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
         conn.commit()
     context.user_data['question_index'] = 0
+    logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
 # ارسال سوال
@@ -106,7 +107,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await check_completed(update, context):
         return
     index = context.user_data.get('question_index', 0)
-    logger.info(f"Asking question {index} for user {update.effective_user.id}")
+    user = update.effective_user
+    logger.info(f"Asking question {index} for user {user.id}")
     if index < len(QUESTIONS):
         question = QUESTIONS[index]
         options = OPTIONS[index]
@@ -117,9 +119,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+            logger.info(f"Sent question {index} to user {user.id}")
         except Exception as e:
-            logger.error(f"Error sending question {index}: {e}")
+            logger.error(f"Error sending question {index} to user {user.id}: {e}")
+            await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
+        logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
 # دریافت پاسخ
@@ -128,21 +133,27 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     if await check_completed(update, context):
         return
-    data = query.data.split('_')
-    index = int(data[0])
-    answer = data[1]
     user = query.from_user
+    logger.info(f"Processing response for user {user.id}")
+    try:
+        data = query.data.split('_')
+        index = int(data[0])
+        answer = data[1]
+        logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
-    logger.info(f"Received response for question {index} from user {user.id}: {answer}")
+        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+        conn.commit()
+        logger.info(f"Saved response for question {index} for user {user.id}")
 
-    cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-    cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
-    conn.commit()
+        context.user_data['question_index'] = index + 1
+        logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
 
-    context.user_data['question_index'] = index + 1
-    logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
-
-    await ask_question(update, context)
+        await ask_question(update, context)
+        logger.info(f"Triggered ask_question for index {context.user_data['question_index']} for user {user.id}")
+    except Exception as e:
+        logger.error(f"Error in handle_response for user {user.id}: {e}")
+        await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
 
 # دریافت شماره نظام پزشکی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -153,6 +164,7 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         medical_id = update.message.text
         cursor.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
         conn.commit()
+        logger.info(f"Saved medical ID for user {user.id}")
         await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
