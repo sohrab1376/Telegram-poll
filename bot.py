@@ -152,9 +152,14 @@ async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # تابع مدیریت درخواست‌های وب‌هوک
 async def webhook(request):
     app = request.app['telegram_app']
-    update = Update.de_json(await request.json(), app.bot)
-    await app.process_update(update)
-    return web.Response()
+    try:
+        update = Update.de_json(await request.json(), app.bot)
+        if update:
+            await app.process_update(update)
+        return web.Response(status=200)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return web.Response(status=500)
 
 # تابع اصلی
 async def main():
@@ -163,8 +168,8 @@ async def main():
         logger.error("No TOKEN provided in environment variables")
         return
 
-    # تنظیم ربات تلگرام
-    app = Application.builder().token(TOKEN).build()
+    # تنظیم ربات تلگرام بدون Polling
+    app = Application.builder().token(TOKEN).updater(None).build()
 
     # ثبت هندلرها
     app.add_handler(CommandHandler("start", start))
@@ -184,8 +189,13 @@ async def main():
     await site.start()
 
     # تنظیم صریح وب‌هوک
-    await app.bot.set_webhook(url=WEBHOOK_URL)
-    logger.info(f"Webhook set to {WEBHOOK_URL}")
+    try:
+        await app.bot.delete_webhook(drop_pending_updates=True)  # حذف وب‌هوک‌های قدیمی
+        await app.bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook successfully set to {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
+        return
 
     # شروع اپلیکیشن
     await app.initialize()
