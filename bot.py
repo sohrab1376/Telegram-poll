@@ -123,6 +123,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
+# اعتبارسنجی پاسخ
+def validate_answer(index: int, answer: str) -> bool:
+    return answer in OPTIONS[index]
+
 # دریافت پاسخ
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -136,6 +140,11 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
+    if not validate_answer(index, answer):
+        logger.error(f"Invalid response for question {index} from user {user.id}: {answer}")
+        await query.message.reply_text("لطفاً یکی از گزینه‌های معتبر را انتخاب کنید.")
+        return
+
     try:
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
         cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
@@ -143,12 +152,18 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.info(f"Saved response for question {index} for user {user.id}")
     except Exception as e:
         logger.error(f"Error saving response for question {index} for user {user.id}: {e}")
+        await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
         return
 
     context.user_data['question_index'] = index + 1
     logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
 
-    await ask_question(update, context)
+    try:
+        await ask_question(update, context)
+        logger.info(f"Triggered ask_question for index {context.user_data['question_index']} for user {user.id}")
+    except Exception as e:
+        logger.error(f"Error triggering ask_question for user {user.id}: {e}")
+        await query.message.reply_text("خطایی در نمایش سوال بعدی رخ داد. لطفاً دوباره امتحان کنید.")
 
 # دریافت شماره نظام پزشکی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
