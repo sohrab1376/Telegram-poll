@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
+from googlesearch import search
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -26,7 +27,7 @@ WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 conn = sqlite3.connect('survey.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# ایجاد جدول
+# ایجاد جدول با ستون جدید برای نام پزشک
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS responses (
     user_id INTEGER PRIMARY KEY,
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS responses (
     q9 TEXT,
     q10 TEXT,
     medical_id TEXT,
+    doctor_name TEXT,
     completed INTEGER DEFAULT 0
 )
 ''')
@@ -49,9 +51,13 @@ try:
     cursor.execute('ALTER TABLE responses ADD COLUMN completed INTEGER DEFAULT 0')
 except sqlite3.OperationalError:
     pass
+try:
+    cursor.execute('ALTER TABLE responses ADD COLUMN doctor_name TEXT')
+except sqlite3.OperationalError:
+    pass
 conn.commit()
 
-# لیست سوالات (با علامت سوال در انتها)
+# لیست سوالات (با علامت سوال)
 QUESTIONS = [
     "سوال 1_همکار گرامی آیا با روند پرداختی های فعلی دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را در شان یک پزشک ممکن میدانید؟",
     "سوال 2_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید؟",
@@ -79,6 +85,22 @@ OPTIONS = [
     [("بله", "yes"), ("خير", "no")]
 ]
 
+# تابع اعتبارسنجی شماره نظام پزشکی و گرفتن تیتر
+def validate_medical_id(medical_id):
+    query = f'"{medical_id}" site:irimc.org'
+    try:
+        results = list(search(query, num_results=1))
+        for result in results:
+            if 'irimc.org' in result:
+                # فرض می‌کنیم تیتر اولین نتیجه اسم و فامیل پزشک است
+                from googlesearch import get_title
+                title = get_title(result) or "نام نامشخص"
+                return True, title
+        return False, None
+    except Exception as e:
+        logger.error(f"Error in Google search for medical ID {medical_id}: {e}")
+        return False, None
+
 # بررسی تکمیل نظرسنجی
 async def check_completed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -94,12 +116,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
     user = update.message.from_user
-    cursor.execute('SELECT * FROM responses WHERE user_id = ?', (user.id,))
-    if not cursor.fetchone():
-        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        conn.commit()
+    # پاک کردن پاسخ‌های قبلی و شروع جدید
+    context.user_data.clear()
     context.user_data['question_index'] = 0
-    context.user_data['last_message_id'] = None  # مقداردهی اولیه برای message_id
+    context.user_data['last_message_id'] = None
+    context.user_data['responses'] = {}  # دیکشنری برای ذخیره موقت پاسخ‌ها
     logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
@@ -129,7 +150,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
-        # حذف سوال آخر قبل از درخواست شماره نظام پزشکی
+        # حذف سوال آخر
         try:
             if context.user_data.get('last_message_id'):
                 await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
@@ -163,10 +184,9 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(f"گزینه انتخاب‌شده برای سوال {index+1} نامعتبر است. لطفاً یکی از گزینه‌های نمایش‌داده‌شده را انتخاب کنید.")
             return
 
-        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer_text, user.id))
-        conn.commit()
-        logger.info(f"Saved response for question {index} for user {user.id}: {answer_text}")
+        # ذخیره موقت پاسخ
+        context.user_data['responses'][f'q{index+1}'] = answer_text
+        logger.info(f"Temporarily saved response for question {index} for user {user.id}: {answer_text}")
 
         # حذف پیام سوال قبلی
         try:
@@ -185,17 +205,41 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error in handle_response for user {user.id}: {e}")
         await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
 
-# دریافت شماره نظام پزشکی
+# دریافت و اعتبارسنجی شماره نظام پزشکی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
     if await check_completed(update, context):
         return
     if context.user_data.get('question_index', 0) == len(QUESTIONS):
-        medical_id = update.message.text
-        cursor.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
-        conn.commit()
-        logger.info(f"Saved medical ID for user {user.id}")
-        await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
+        medical_id = update.message.text.strip()
+        logger.info(f"Received medical ID {medical_id} from user {user.id}")
+
+        # اعتبارسنجی شماره نظام پزشکی
+        is_valid, doctor_name = validate_medical_id(medical_id)
+        if is_valid:
+            # ذخیره پاسخ‌ها و نام پزشک در دیتابیس
+            cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+            responses = context.user_data.get('responses', {})
+            cursor.execute('''
+                UPDATE responses SET
+                q1 = ?, q2 = ?, q3 = ?, q4 = ?, q5 = ?,
+                q6 = ?, q7 = ?, q8 = ?, q9 = ?, q10 = ?,
+                medical_id = ?, doctor_name = ?, completed = 1
+                WHERE user_id = ?
+            ''', (
+                responses.get('q1'), responses.get('q2'), responses.get('q3'),
+                responses.get('q4'), responses.get('q5'), responses.get('q6'),
+                responses.get('q7'), responses.get('q8'), responses.get('q9'),
+                responses.get('q10'), medical_id, doctor_name, user.id
+            ))
+            conn.commit()
+            logger.info(f"Saved responses, medical ID {medical_id}, and doctor name {doctor_name} for user {user.id}")
+            await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
+            # پاک کردن پاسخ‌های موقت
+            context.user_data.clear()
+        else:
+            logger.info(f"Invalid medical ID {medical_id} for user {user.id}")
+            await update.message.reply_text('شماره نظام پزشکی که وارد کردید معتبر نیست. لطفاً مجدداً شماره نظام پزشکی خود را وارد کنید.')
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
 
@@ -218,11 +262,10 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     response_text = f"گزارش خلاصه نظرسنجی:\nتعداد پاسخ‌دهندگان: {total_responses}\n\n"
     for q_index in range(len(QUESTIONS)):
         response_text += f"سوال {q_index+1}:\n"
-        # شمارش پاسخ‌ها برای هر گزینه
         cursor.execute(f'SELECT q{q_index+1}, COUNT(*) FROM responses WHERE completed = 1 GROUP BY q{q_index+1}')
         answers = cursor.fetchall()
         for answer, count in answers:
-            if answer:  # نادیده گرفتن پاسخ‌های خالی
+            if answer:
                 percentage = (count / total_responses) * 100
                 response_text += f"- {answer}: {percentage:.1f}%\n"
         response_text += "\n"
@@ -237,7 +280,7 @@ async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.' if await check_completed(update, context) else 'فقط ادمین می‌تونه نتایج رو ببینه!')
         return
 
-    cursor.execute('SELECT * FROM responses')
+    cursor.execute('SELECT * FROM responses WHERE completed = 1')
     rows = cursor.fetchall()
     if not rows:
         await update.message.reply_text("هیچ پاسخی ثبت نشده.")
@@ -245,7 +288,7 @@ async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     response_text = "نتایج نظرسنجی:\n"
     for row in rows:
-        response_text += f"کاربر: @{row[1]} (ID: {row[0]})\n"
+        response_text += f"کاربر: @{row[1]} (ID: {row[0]}) - نام: {row[13] or 'نامشخص'}\n"
         for i in range(1, 11):
             response_text += f"سوال {i}: {row[i+1]}\n"
         response_text += f"شماره نظام پزشکی: {row[12]}\n\n"
