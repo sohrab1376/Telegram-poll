@@ -125,7 +125,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
-        await (update.message or update.callback_query.message).reply_text('جهت احراز صلاحیت شرکت در نظرسنجی، احتراما شماره نظام پزشکی خود را وارد نمایید')
+        await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
 # دریافت پاسخ
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
