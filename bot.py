@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # خواندن توکن و پورت از متغیرهای محیطی
 TOKEN = os.getenv('TOKEN')
 PORT = int(os.getenv('PORT', '10000'))  # پورت پیش‌فرض 10000 برای Render
+WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 
 # اتصال به دیتابیس SQLite
 conn = sqlite3.connect('survey.db', check_same_thread=False)
@@ -169,7 +170,7 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_response))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_id))
-    app.add_handler(CommandHandler("results", results))  # هندلر برای دستور results
+    app.add_handler(CommandHandler("results", results))
 
     # تنظیم سرور aiohttp
     web_app = web.Application()
@@ -182,16 +183,13 @@ async def main():
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
 
-    # تنظیم وب‌هوک تلگرام
+    # تنظیم صریح وب‌هوک
+    await app.bot.set_webhook(url=WEBHOOK_URL)
+    logger.info(f"Webhook set to {WEBHOOK_URL}")
+
+    # شروع اپلیکیشن
     await app.initialize()
     await app.start()
-    await app.updater.start_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="/",
-        webhook_url="https://telegram-poll.onrender.com/"
-    )
-
     logger.info(f"Bot started on port {PORT}")
 
 if __name__ == '__main__':
