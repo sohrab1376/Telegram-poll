@@ -14,6 +14,7 @@ import sqlite3
 from aiohttp import web
 import requests
 from bs4 import BeautifulSoup
+import urllib.parse
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -89,21 +90,23 @@ OPTIONS = [
 # تابع اعتبارسنجی شماره نظام پزشکی و گرفتن تیتر
 def validate_medical_id(medical_id):
     query = f'"{medical_id}" site:irimc.org'
+    encoded_query = urllib.parse.quote(query)
     try:
-        # سرچ گوگل با requests و BeautifulSoup
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(f"https://www.google.com/search?q={query}", headers=headers, timeout=5)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(f"https://www.google.com/search?q={encoded_query}", headers=headers, timeout=10)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        results = soup.find_all('a')
+        results = soup.find_all('div', class_='yuRUbf')
         for result in results:
-            href = result.get('href', '')
-            if 'irimc.org' in href:
-                # گرفتن تیتر نتیجه
-                title = result.find_parent().find('h3')
+            link = result.find('a')
+            if link and 'irimc.org' in link['href']:
+                title = result.find('h3')
                 title_text = title.get_text() if title else "نام نامشخص"
-                logger.info(f"Found valid result for medical ID {medical_id}: URL={href}, Title={title_text}")
+                logger.info(f"Valid medical ID {medical_id}: URL={link['href']}, Title={title_text}")
                 return True, title_text
-        logger.info(f"No valid results found for medical ID {medical_id}")
+        logger.info(f"No valid results for medical ID {medical_id}")
         return False, None
     except Exception as e:
         logger.error(f"Error validating medical ID {medical_id}: {e}")
