@@ -12,7 +12,8 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
-from googlesearch import search
+import requests
+from bs4 import BeautifulSoup
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -89,16 +90,23 @@ OPTIONS = [
 def validate_medical_id(medical_id):
     query = f'"{medical_id}" site:irimc.org'
     try:
-        results = list(search(query, num_results=1))
+        # سرچ گوگل با requests و BeautifulSoup
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(f"https://www.google.com/search?q={query}", headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        results = soup.find_all('a')
         for result in results:
-            if 'irimc.org' in result:
-                # فرض می‌کنیم تیتر اولین نتیجه اسم و فامیل پزشک است
-                from googlesearch import get_title
-                title = get_title(result) or "نام نامشخص"
-                return True, title
+            href = result.get('href', '')
+            if 'irimc.org' in href:
+                # گرفتن تیتر نتیجه
+                title = result.find_parent().find('h3')
+                title_text = title.get_text() if title else "نام نامشخص"
+                logger.info(f"Found valid result for medical ID {medical_id}: URL={href}, Title={title_text}")
+                return True, title_text
+        logger.info(f"No valid results found for medical ID {medical_id}")
         return False, None
     except Exception as e:
-        logger.error(f"Error in Google search for medical ID {medical_id}: {e}")
+        logger.error(f"Error validating medical ID {medical_id}: {e}")
         return False, None
 
 # بررسی تکمیل نظرسنجی
