@@ -51,32 +51,32 @@ except sqlite3.OperationalError:
     pass
 conn.commit()
 
-# لیست سوالات
+# لیست سوالات (تمیز شده)
 QUESTIONS = [
-    "سوال ۱_همکار گرامی آیا با روند پرداختی های فعلی، دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را، در شان یک پزشک، ممکن می‌دانید؟",
-    "سوال ۲_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید؟",
-    "سوال ۳_همکار گرامی در حال حاضر مشغول سپری کردن کدام یک از موارد زیر هستید؟",
-    "سوال ۴_همکار گرامی آیا در حال حاضر پروانه طبابت فعال، پروانه موقت و یا نامه عدم نیاز در ساعات غیر اداری در اختیار دارید؟!",
-    "سوال ۵_همکار گرامی آیا طی یک ماهه گذشته در درمانگاهی مشغول به کار بوده اید؟",
-    "سوال ۶_همکار گرامی آیا با مطالبه «کف پرداختی ساعتی ۴۰۰ ت همراه با ۲۵ درصد خدمات و ۵۰ درصد پروسیژر» و یا «پرکیس معادل کا حرفه ای درصورت ویزیت میانگین بیشتر از ۴ بیمار در ساعت» و عدم پذیرش همکاری با نرخ کمتر از این مقدار به صورت علل حساب تا زمان حصول یک فرمول جامع موافق هستید؟!",
-    "سوال ۷_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع کامل هرگونه همکاری با درمانگاهداران و عدم تمدید قرارداد تا حصول پرداختی قابل قبول\" با این حرکت اعتراضی همراه خواهید بود؟!",
-    "سوال ۸_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"برنداشتن شیفت، خالی گذاشتن و کاور نکردن آن ها فقط در روز های مشخصی از هر ماه\" با این حرکت اعتراضی همراه خواهید بود؟!",
-    "سوال ۹_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر \"قطع هرگونه همکاری و عدم تمدید قرارداد با تعداد مشخصی از درمانگاه های بدحساب\" با این حرکت اعتراضی همراه خواهید بود؟!",
-    "سوال ۱۰_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده؟!"
+    "سوال 1_همکار گرامی آیا با روند پرداختی های فعلی دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را در شان یک پزشک ممکن میدانید",
+    "سوال 2_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید",
+    "سوال 3_همکار گرامی در حال حاضر مشغول سپری کردن کدام یک از موارد زیر هستید",
+    "سوال 4_همکار گرامی آیا در حال حاضر پروانه طبابت فعال پروانه موقت و یا نامه عدم نیاز در ساعات غیر اداری در اختیار دارید",
+    "سوال 5_همکار گرامی آیا طی یک ماهه گذشته در درمانگاهی مشغول به کار بوده اید",
+    "سوال 6_همکار گرامی آیا با مطالبه کف پرداختی ساعتی 400 ت همراه با 25 درصد خدمات و 50 درصد پروسیژر و یا پرکیس معادل کا حرفه ای درصورت ویزیت میانگین بیشتر از 4 بیمار در ساعت و عدم پذیرش همکاری با نرخ کمتر از این مقدار به صورت علل حساب تا زمان حصول یک فرمول جامع موافق هستید",
+    "سوال 7_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر قطع کامل هرگونه همکاری با درمانگاهداران و عدم تمدید قرارداد تا حصول پرداختی قابل قبول با این حرکت اعتراضی همراه خواهید بود",
+    "سوال 8_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر برنداشتن شیفت خالی گذاشتن و کاور نکردن آن ها فقط در روز های مشخصی از هر ماه با این حرکت اعتراضی همراه خواهید بود",
+    "سوال 9_همکار گرامی آیا در صورت تصمیم جمعی مبنی بر قطع هرگونه همکاری و عدم تمدید قرارداد با تعداد مشخصی از درمانگاه های بدحساب با این حرکت اعتراضی همراه خواهید بود",
+    "سوال 10_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده"
 ]
 
-# گزینه‌های هر سوال
+# گزینه‌های هر سوال (نمایش فارسی، callback_data لاتین)
 OPTIONS = [
-    ["بله", "خیر"],
-    ["بله", "خیر"],
-    ["طرح اجباری", "خدمت اجباری", "هنوز طرح یا خدمت اجباری را شروع نکردم", "طرح یا خدمت اجباری را قبلا سپری کردم"],
-    ["بله", "خیر"],
-    ["درمانگاه خصوصی کمتر از 10 شیفت", "درمانگاه خصوصی بیشتر از 10 شیفت", "سایر مراکز کمتر از 10 شیفت", "سایر مراکز بیشتر از 10 شیفت", "خیر"],
-    ["بله", "خیر"],
-    ["بله", "خیر"],
-    ["بله", "خیر"],
-    ["بله", "خیر"],
-    ["بله", "خیر"]
+    [("بله", "yes"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("طرح اجباری", "mandatory_plan"), ("خدمت اجباری", "mandatory_service"), ("هنوز طرح یا خدمت اجباری را شروع نکردم", "not_started"), ("طرح یا خدمت اجباری را قبلا سپری کردم", "completed")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("درمانگاه خصوصی کمتر از 10 شیفت", "private_less_10"), ("درمانگاه خصوصی بیشتر از 10 شیفت", "private_more_10"), ("سایر مراکز کمتر از 10 شیفت", "other_less_10"), ("سایر مراکز بیشتر از 10 شیفت", "other_more_10"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")],
+    [("بله", "yes"), ("خیر", "no")]
 ]
 
 # بررسی تکمیل نظرسنجی
@@ -112,14 +112,14 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if index < len(QUESTIONS):
         question = QUESTIONS[index]
         options = OPTIONS[index]
-        keyboard = [[InlineKeyboardButton(option, callback_data=f"{index}_{option}")] for option in options]
+        keyboard = [[InlineKeyboardButton(text, callback_data=f"{index}_{data}")] for text, data in options]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
             if update.message:
                 await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
-            logger.info(f"Sent question {index} to user {user.id}")
+            logger.info(f"Sent question {index} to user {user.id} with callback_data: {[f'{index}_{data}' for _, data in options]}")
         except Exception as e:
             logger.error(f"Error sending question {index} to user {user.id}: {e}")
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
@@ -141,10 +141,20 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         answer = data[1]
         logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
+        # تبدیل callback_data به متن نمایش
+        for text, cb_data in OPTIONS[index]:
+            if cb_data == answer:
+                answer_text = text
+                break
+        else:
+            logger.error(f"Invalid callback_data for question {index} from user {user.id}: {answer}")
+            await query.message.reply_text("گزینه نامعتبر. لطفاً دوباره سعی کنید.")
+            return
+
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer_text, user.id))
         conn.commit()
-        logger.info(f"Saved response for question {index} for user {user.id}")
+        logger.info(f"Saved response for question {index} for user {user.id}: {answer_text}")
 
         context.user_data['question_index'] = index + 1
         logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
