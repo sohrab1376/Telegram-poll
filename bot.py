@@ -164,7 +164,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = Dump', (answer_text, user.id))
+        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer_text, user.id))  # فیکس خطا
         conn.commit()
         logger.info(f"Saved response for question {index} for user {user.id}: {answer_text}")
 
