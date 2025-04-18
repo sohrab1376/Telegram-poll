@@ -2,7 +2,14 @@
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 import sqlite3
 from aiohttp import web
 
@@ -130,7 +137,7 @@ async def main():
     # ثبت هندلرها
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_response))
-    app.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_medical_id))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_id))
 
     # تنظیم سرور aiohttp
     web_app = web.Application()
