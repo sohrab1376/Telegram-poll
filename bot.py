@@ -12,9 +12,6 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
-import requests
-from bs4 import BeautifulSoup
-import urllib.parse
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -29,7 +26,7 @@ WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 conn = sqlite3.connect('survey.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# ایجاد جدول با ستون جدید برای نام پزشک
+# ایجاد جدول
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS responses (
     user_id INTEGER PRIMARY KEY,
@@ -45,16 +42,11 @@ CREATE TABLE IF NOT EXISTS responses (
     q9 TEXT,
     q10 TEXT,
     medical_id TEXT,
-    doctor_name TEXT,
     completed INTEGER DEFAULT 0
 )
 ''')
 try:
     cursor.execute('ALTER TABLE responses ADD COLUMN completed INTEGER DEFAULT 0')
-except sqlite3.OperationalError:
-    pass
-try:
-    cursor.execute('ALTER TABLE responses ADD COLUMN doctor_name TEXT')
 except sqlite3.OperationalError:
     pass
 conn.commit()
@@ -87,31 +79,6 @@ OPTIONS = [
     [("بله", "yes"), ("خير", "no")]
 ]
 
-# تابع اعتبارسنجی شماره نظام پزشکی و گرفتن تیتر
-def validate_medical_id(medical_id):
-    query = f"{medical_id} site:irimc.org"
-    encoded_query = urllib.parse.quote(query)
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-        }
-        response = requests.get(f"https://www.google.com/search?q={encoded_query}", headers=headers, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        # پیدا کردن اولین نتیجه معتبر
-        for result in soup.find_all('div', class_='tF2Cxc'):
-            link = result.find('a')
-            if link and 'irimc.org' in link['href']:
-                title = result.find('h3')
-                title_text = title.get_text() if title else "نام نامشخص"
-                logger.info(f"Valid medical ID {medical_id}: URL={link['href']}, Title={title_text}")
-                return True, title_text
-        logger.info(f"No valid results for medical ID {medical_id}")
-        return False, None
-    except Exception as e:
-        logger.error(f"Error validating medical ID {medical_id}: {e}")
-        return False, None
-
 # بررسی تکمیل نظرسنجی
 async def check_completed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -127,11 +94,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
     user = update.message.from_user
-    # پاک کردن پاسخ‌های قبلی و شروع جدید
-    context.user_data.clear()
+    # آماده‌سازی برای ذخیره موقت پاسخ‌ها
+    context.user_data['responses'] = {}  # دیکشنری برای ذخیره پاسخ‌ها
     context.user_data['question_index'] = 0
     context.user_data['last_message_id'] = None
-    context.user_data['responses'] = {}  # دیکشنری برای ذخیره موقت پاسخ‌ها
     logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
@@ -195,7 +161,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(f"گزینه انتخاب‌شده برای سوال {index+1} نامعتبر است. لطفاً یکی از گزینه‌های نمایش‌داده‌شده را انتخاب کنید.")
             return
 
-        # ذخیره موقت پاسخ
+        # ذخیره موقت پاسخ تو context.user_data
         context.user_data['responses'][f'q{index+1}'] = answer_text
         logger.info(f"Temporarily saved response for question {index} for user {user.id}: {answer_text}")
 
@@ -216,41 +182,42 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error in handle_response for user {user.id}: {e}")
         await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
 
-# دریافت و اعتبارسنجی شماره نظام پزشکی
+# دریافت شماره نظام پزشکی و ذخیره پاسخ‌ها
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
     if await check_completed(update, context):
         return
     if context.user_data.get('question_index', 0) == len(QUESTIONS):
-        medical_id = update.message.text.strip()
-        logger.info(f"Received medical ID {medical_id} from user {user.id}")
+        medical_id = update.message.text
+        responses = context.user_data.get('responses', {})
 
-        # اعتبارسنجی شماره نظام پزشکی
-        is_valid, doctor_name = validate_medical_id(medical_id)
-        if is_valid:
-            # ذخیره پاسخ‌ها و نام پزشک در دیتابیس
+        # مطمئن شو همه سوالات جواب داده شدن
+        if len(responses) != len(QUESTIONS):
+            await update.message.reply_text('لطفاً همه سوالات را پاسخ دهید.')
+            return
+
+        # ذخیره همه پاسخ‌ها تو دیتابیس
+        try:
             cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-            responses = context.user_data.get('responses', {})
             cursor.execute('''
                 UPDATE responses SET
                 q1 = ?, q2 = ?, q3 = ?, q4 = ?, q5 = ?,
                 q6 = ?, q7 = ?, q8 = ?, q9 = ?, q10 = ?,
-                medical_id = ?, doctor_name = ?, completed = 1
+                medical_id = ?, completed = 1
                 WHERE user_id = ?
             ''', (
-                responses.get('q1'), responses.get('q2'), responses.get('q3'),
-                responses.get('q4'), responses.get('q5'), responses.get('q6'),
-                responses.get('q7'), responses.get('q8'), responses.get('q9'),
-                responses.get('q10'), medical_id, doctor_name, user.id
+                responses.get('q1'), responses.get('q2'), responses.get('q3'), responses.get('q4'), responses.get('q5'),
+                responses.get('q6'), responses.get('q7'), responses.get('q8'), responses.get('q9'), responses.get('q10'),
+                medical_id, user.id
             ))
             conn.commit()
-            logger.info(f"Saved responses, medical ID {medical_id}, and doctor name {doctor_name} for user {user.id}")
+            logger.info(f"Saved all responses and medical ID for user {user.id}")
             await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
             # پاک کردن پاسخ‌های موقت
-            context.user_data.clear()
-        else:
-            logger.info(f"Invalid medical ID {medical_id} for user {user.id}")
-            await update.message.reply_text('شماره نظام پزشکی که وارد کردید معتبر نیست. لطفاً مجدداً شماره نظام پزشکی خود را وارد کنید.')
+            context.user_data['responses'] = {}
+        except Exception as e:
+            logger.error(f"Error saving responses for user {user.id}: {e}")
+            await update.message.reply_text('خطایی در ثبت پاسخ‌ها رخ داد. لطفاً دوباره سعی کنید.')
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
 
@@ -262,14 +229,12 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('فقط ادمین می‌تونه گزارش رو ببینه!')
         return
 
-    # تعداد پاسخ‌دهندگان کامل
     cursor.execute('SELECT COUNT(*) FROM responses WHERE completed = 1')
     total_responses = cursor.fetchone()[0]
     if total_responses == 0:
         await update.message.reply_text("هیچ پاسخی ثبت نشده.")
         return
 
-    # ساخت گزارش
     response_text = f"گزارش خلاصه نظرسنجی:\nتعداد پاسخ‌دهندگان: {total_responses}\n\n"
     for q_index in range(len(QUESTIONS)):
         response_text += f"سوال {q_index+1}:\n"
@@ -299,7 +264,7 @@ async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     response_text = "نتایج نظرسنجی:\n"
     for row in rows:
-        response_text += f"کاربر: @{row[1]} (ID: {row[0]}) - نام: {row[13] or 'نامشخص'}\n"
+        response_text += f"کاربر: @{row[1]} (ID: {row[0]})\n"
         for i in range(1, 11):
             response_text += f"سوال {i}: {row[i+1]}\n"
         response_text += f"شماره نظام پزشکی: {row[12]}\n\n"
