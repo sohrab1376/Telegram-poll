@@ -117,8 +117,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+            logger.info(f"Sent question {index} successfully to user {update.effective_user.id}")
         except Exception as e:
-            logger.error(f"Error sending question {index}: {e}")
+            logger.error(f"Error sending question {index} to user {update.effective_user.id}: {e}")
     else:
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
@@ -135,9 +136,14 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
-    cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-    cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
-    conn.commit()
+    try:
+        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+        conn.commit()
+        logger.info(f"Saved response for question {index} for user {user.id}")
+    except Exception as e:
+        logger.error(f"Error saving response for question {index} for user {user.id}: {e}")
+        return
 
     context.user_data['question_index'] = index + 1
     logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
