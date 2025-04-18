@@ -99,6 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
         conn.commit()
     context.user_data['question_index'] = 0
+    context.user_data['last_message_id'] = None  # مقداردهی اولیه برای message_id
     logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
@@ -115,16 +116,27 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         keyboard = [[InlineKeyboardButton(text, callback_data=f"{index}_{data}")] for text, data in options]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
+            # ارسال سوال جدید
             if update.message:
-                await update.message.reply_text(question, reply_markup=reply_markup)
+                message = await update.message.reply_text(question, reply_markup=reply_markup)
             else:
-                await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
-            logger.info(f"Sent question {index} to user {user.id} with callback_data: {[f'{index}_{data}' for _, data in options]}")
+                message = await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+            # ذخیره message_id سوال فعلی
+            context.user_data['last_message_id'] = message.message_id
+            logger.info(f"Sent question {index} to user {user.id} with callback_data: {[f'{index}_{data}' for _, data in options]}, message_id: {message.message_id}")
         except Exception as e:
             logger.error(f"Error sending question {index} to user {user.id}: {e}")
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
+        # حذف سوال آخر قبل از درخواست شماره نظام پزشکی
+        try:
+            if context.user_data.get('last_message_id'):
+                await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
+                logger.info(f"Deleted last question message for user {user.id}, message_id: {context.user_data['last_message_id']}")
+        except Exception as e:
+            logger.error(f"Failed to delete last question message for user {user.id}: {e}")
+        context.user_data['last_message_id'] = None
         await (update.message or update.callback_query.message).reply_text('جهت احراز صلاحیت شرکت در نظرسنجی، احتراما شماره نظام پزشکی خود را وارد نمایید')
 
 # دریافت پاسخ
@@ -152,9 +164,17 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer_text, user.id))
+        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = Dump', (answer_text, user.id))
         conn.commit()
         logger.info(f"Saved response for question {index} for user {user.id}: {answer_text}")
+
+        # حذف پیام سوال قبلی
+        try:
+            if context.user_data.get('last_message_id'):
+                await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
+                logger.info(f"Deleted previous question message for user {user.id}, message_id: {context.user_data['last_message_id']}")
+        except Exception as e:
+            logger.error(f"Failed to delete previous question message for user {user.id}: {e}")
 
         context.user_data['question_index'] = index + 1
         logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
@@ -179,7 +199,37 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
 
-# نمایش نتایج
+# نمایش گزارش خلاصه نتایج
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = 130742264
+    user = update.message.from_user
+    if user.id != admin_id:
+        await update.message.reply_text('فقط ادمین می‌تونه گزارش رو ببینه!')
+        return
+
+    # تعداد پاسخ‌دهندگان کامل
+    cursor.execute('SELECT COUNT(*) FROM responses WHERE completed = 1')
+    total_responses = cursor.fetchone()[0]
+    if total_responses == 0:
+        await update.message.reply_text("هیچ پاسخی ثبت نشده.")
+        return
+
+    # ساخت گزارش
+    response_text = f"گزارش خلاصه نظرسنجی:\nتعداد پاسخ‌دهندگان: {total_responses}\n\n"
+    for q_index in range(len(QUESTIONS)):
+        response_text += f"سوال {q_index+1}:\n"
+        # شمارش پاسخ‌ها برای هر گزینه
+        cursor.execute(f'SELECT q{q_index+1}, COUNT(*) FROM responses WHERE completed = 1 GROUP BY q{q_index+1}')
+        answers = cursor.fetchall()
+        for answer, count in answers:
+            if answer:  # نادیده گرفتن پاسخ‌های خالی
+                percentage = (count / total_responses) * 100
+                response_text += f"- {answer}: {percentage:.1f}%\n"
+        response_text += "\n"
+
+    await update.message.reply_text(response_text)
+
+# نمایش نتایج کامل
 async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     admin_id = 130742264
     user = update.message.from_user
@@ -230,6 +280,7 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_response))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_id))
     app.add_handler(CommandHandler("results", results))
+    app.add_handler(CommandHandler("summary", summary))
 
     web_app = web.Application()
     web_app['telegram_app'] = app
