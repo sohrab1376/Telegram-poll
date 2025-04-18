@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
+from asyncio import Lock
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -79,6 +80,9 @@ OPTIONS = [
     ["بله", "خیر"]
 ]
 
+# قفل برای جلوگیری از تداخل
+user_locks = {}
+
 # بررسی تکمیل نظرسنجی
 async def check_completed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
@@ -99,14 +103,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
         conn.commit()
     context.user_data['question_index'] = 0
+    logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
 # ارسال سوال
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
+    user = update.effective_user
     index = context.user_data.get('question_index', 0)
-    logger.info(f"Asking question {index} for user {update.effective_user.id}")
+    logger.info(f"Preparing to ask question {index} for user {user.id}")
     if index < len(QUESTIONS):
         question = QUESTIONS[index]
         options = OPTIONS[index]
@@ -117,15 +123,19 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
-            logger.info(f"Sent question {index} successfully to user {update.effective_user.id}")
+            logger.info(f"Sent question {index} to user {user.id}")
         except Exception as e:
-            logger.error(f"Error sending question {index} to user {update.effective_user.id}: {e}")
+            logger.error(f"Failed to send question {index} to user {user.id}: {e}")
+            await (update.message or update.callback_query.message).reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
     else:
+        logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
 # اعتبارسنجی پاسخ
 def validate_answer(index: int, answer: str) -> bool:
-    return answer in OPTIONS[index]
+    valid = answer in OPTIONS[index]
+    logger.info(f"Validating answer for question {index}: {answer} -> {'Valid' if valid else 'Invalid'}")
+    return valid
 
 # دریافت پاسخ
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -133,37 +143,42 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     if await check_completed(update, context):
         return
-    data = query.data.split('_')
-    index = int(data[0])
-    answer = data[1]
     user = query.from_user
 
-    logger.info(f"Received response for question {index} from user {user.id}: {answer}")
+    # قفل برای کاربر
+    if user.id not in user_locks:
+        user_locks[user.id] = Lock()
+    async with user_locks[user.id]:
+        logger.info(f"Processing response for user {user.id}")
+        try:
+            data = query.data.split('_')
+            index = int(data[0])
+            answer = data[1]
+            logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
-    if not validate_answer(index, answer):
-        logger.error(f"Invalid response for question {index} from user {user.id}: {answer}")
-        await query.message.reply_text("لطفاً یکی از گزینه‌های معتبر را انتخاب کنید.")
-        return
+            if not validate_answer(index, answer):
+                logger.error(f"Invalid response for question {index} from user {user.id}: {answer}")
+                await query.message.reply_text("لطفاً یکی از گزینه‌های معتبر را انتخاب کنید.")
+                return
 
-    try:
-        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
-        conn.commit()
-        logger.info(f"Saved response for question {index} for user {user.id}")
-    except Exception as e:
-        logger.error(f"Error saving response for question {index} for user {user.id}: {e}")
-        await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
-        return
+            # ذخیره پاسخ
+            cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+            cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+            conn.commit()
+            logger.info(f"Saved response for question {index} for user {user.id}")
 
-    context.user_data['question_index'] = index + 1
-    logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
+            # آپدیت اندیس
+            old_index = context.user_data.get('question_index', 0)
+            context.user_data['question_index'] = index + 1
+            logger.info(f"Updated question_index from {old_index} to {context.user_data['question_index']} for user {user.id}")
 
-    try:
-        await ask_question(update, context)
-        logger.info(f"Triggered ask_question for index {context.user_data['question_index']} for user {user.id}")
-    except Exception as e:
-        logger.error(f"Error triggering ask_question for user {user.id}: {e}")
-        await query.message.reply_text("خطایی در نمایش سوال بعدی رخ داد. لطفاً دوباره امتحان کنید.")
+            # ارسال سوال بعدی
+            await ask_question(update, context)
+            logger.info(f"Triggered ask_question for index {context.user_data['question_index']} for user {user.id}")
+        except Exception as e:
+            logger.error(f"Error in handle_response for user {user.id}: {e}")
+            await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
+            return
 
 # دریافت شماره نظام پزشکی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -174,6 +189,7 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         medical_id = update.message.text
         cursor.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
         conn.commit()
+        logger.info(f"Saved medical ID for user {user.id}")
         await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
