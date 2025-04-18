@@ -1,4 +1,20 @@
 
+عذرخواهی می‌کنم بابت این اشتباه. شما درست اشاره کردید که آیدی ادمین در کد قبلی هاردکد شده بود (`admin_id = 130742264`) و باید به صورت متغیر محیطی یا به روش امن‌تری مدیریت شود. در کد اصلاح‌شده زیر، آیدی ادمین را به صورت متغیر محیطی (`ADMIN_ID`) به کد اضافه کرده‌ام تا از هاردکد کردن جلوگیری شود و امنیت بیشتری داشته باشد. همچنین، سایر تغییرات قبلی (مثل استفاده از `aiosqlite` و لاگ‌های پیشرفته) حفظ شده‌اند.
+
+---
+
+### **تغییرات جدید**
+1. **مدیریت آیدی ادمین**:
+   - آیدی ادمین حالا از متغیر محیطی `ADMIN_ID` خوانده می‌شود.
+   - اگر `ADMIN_ID` تنظیم نشده باشد، برنامه با خطا متوقف می‌شود و لاگ مربوطه ثبت می‌شود.
+2. **بررسی‌های اضافی**:
+   - اضافه کردن لاگ برای بررسی مقدار `ADMIN_ID` در زمان اجرا.
+   - اطمینان از اینکه فقط ادمین به دستور `/results` دسترسی دارد.
+
+---
+
+### **کد کامل اصلاح‌شده**
+```python
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,46 +26,58 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-import sqlite3
+import aiosqlite
 from aiohttp import web
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# خواندن توکن و پورت
+# خواندن توکن، پورت و آیدی ادمین
 TOKEN = os.getenv('TOKEN')
 PORT = int(os.getenv('PORT', '10000'))
+ADMIN_ID = os.getenv('ADMIN_ID')
 WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 
-# اتصال به دیتابیس
-conn = sqlite3.connect('survey.db', check_same_thread=False)
-cursor = conn.cursor()
+# بررسی وجود آیدی ادمین
+if not ADMIN_ID:
+    logger.error("No ADMIN_ID provided in environment variables")
+    raise ValueError("ADMIN_ID environment variable is required")
+else:
+    logger.info(f"Admin ID set to {ADMIN_ID}")
+
+# اتصال به دیتابیس به صورت غیرهمزمان
+async def get_db():
+    db = await aiosqlite.connect('survey.db')
+    db.row_factory = aiosqlite.Row
+    return db
 
 # ایجاد جدول
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS responses (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    q1 TEXT,
-    q2 TEXT,
-    q3 TEXT,
-    q4 TEXT,
-    q5 TEXT,
-    q6 TEXT,
-    q7 TEXT,
-    q8 TEXT,
-    q9 TEXT,
-    q10 TEXT,
-    medical_id TEXT,
-    completed INTEGER DEFAULT 0
-)
-''')
-try:
-    cursor.execute('ALTER TABLE responses ADD COLUMN completed INTEGER DEFAULT 0')
-except sqlite3.OperationalError:
-    pass
-conn.commit()
+async def init_db():
+    async with await get_db() as db:
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS responses (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            q1 TEXT,
+            q2 TEXT,
+            q3 TEXT,
+            q4 TEXT,
+            q5 TEXT,
+            q6 TEXT,
+            q7 TEXT,
+            q8 TEXT,
+            q9 TEXT,
+            q10 TEXT,
+            medical_id TEXT,
+            completed INTEGER DEFAULT 0
+        )
+        ''')
+        try:
+            await db.execute('ALTER TABLE responses ADD COLUMN completed INTEGER DEFAULT 0')
+        except aiosqlite.OperationalError:
+            pass
+        await db.commit()
 
 # لیست سوالات
 QUESTIONS = [
@@ -79,14 +107,21 @@ OPTIONS = [
     ["بله", "خیر"]
 ]
 
+# اعتبارسنجی تعداد سوالات و گزینه‌ها
+if len(QUESTIONS) != len(OPTIONS):
+    logger.error("Mismatch between QUESTIONS and OPTIONS lengths")
+    raise ValueError("Number of questions and options must match")
+
 # بررسی تکمیل نظرسنجی
 async def check_completed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
-    cursor.execute('SELECT completed FROM responses WHERE user_id = ?', (user.id,))
-    result = cursor.fetchone()
-    if result and result[0] == 1:
-        await update.effective_message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.')
-        return True
+    async with await get_db() as db:
+        async with db.execute('SELECT completed FROM responses WHERE user_id = ?', (user.id,)) as cursor:
+            result = await cursor.fetchone()
+            if result and result['completed'] == 1:
+                await update.effective_message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.')
+                logger.info(f"User {user.id} blocked due to completed survey")
+                return True
     return False
 
 # شروع نظرسنجی
@@ -94,11 +129,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
     user = update.message.from_user
-    cursor.execute('SELECT * FROM responses WHERE user_id = ?', (user.id,))
-    if not cursor.fetchone():
-        cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-        conn.commit()
+    async with await get_db() as db:
+        async with db.execute('SELECT * FROM responses WHERE user_id = ?', (user.id,)) as cursor:
+            if not await cursor.fetchone():
+                await db.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+                await db.commit()
     context.user_data['question_index'] = 0
+    logger.info(f"Starting survey for user {user.id}")
     await ask_question(update, context)
 
 # ارسال سوال
@@ -106,7 +143,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if await check_completed(update, context):
         return
     index = context.user_data.get('question_index', 0)
-    logger.info(f"Asking question {index} for user {update.effective_user.id}")
+    logger.info(f"Preparing to ask question {index} for user {update.effective_user.id}")
     if index < len(QUESTIONS):
         question = QUESTIONS[index]
         options = OPTIONS[index]
@@ -117,9 +154,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
+            logger.info(f"Question {index} sent to user {update.effective_user.id}")
         except Exception as e:
-            logger.error(f"Error sending question {index}: {e}")
+            logger.error(f"Error sending question {index} to user {update.effective_user.id}: {e}")
     else:
+        logger.info(f"Reached end of questions for user {update.effective_user.id}")
         await (update.message or update.callback_query.message).reply_text('لطفاً شماره نظام پزشکی خود را وارد کنید:')
 
 # دریافت پاسخ
@@ -133,15 +172,17 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     answer = data[1]
     user = query.from_user
 
-    logger.info(f"Received response for question {index} from user {user.id}: {answer}")
+    logger.info(f"Processing response for question {index} from user {user.id}: {answer}")
 
-    cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
-    cursor.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
-    conn.commit()
+    async with await get_db() as db:
+        await db.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
+        await db.execute(f'UPDATE responses SET q{index+1} = ? WHERE user_id = ?', (answer, user.id))
+        await db.commit()
 
     context.user_data['question_index'] = index + 1
-    logger.info(f"Updated question_index to {context.user_data['question_index']} for user {user.id}")
-
+    logger.info(f"Set question_index to {context.user_data['question_index']} for user {user.id}")
+    if context.user_data['question_index'] >= len(QUESTIONS):
+        logger.info(f"User {user.id} reached end of questions")
     await ask_question(update, context)
 
 # دریافت شماره نظام پزشکی
@@ -151,38 +192,42 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if context.user_data.get('question_index', 0) == len(QUESTIONS):
         medical_id = update.message.text
-        cursor.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
-        conn.commit()
+        async with await get_db() as db:
+            await db.execute('UPDATE responses SET medical_id = ?, completed = 1 WHERE user_id = ?', (medical_id, user.id))
+            await db.commit()
         await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
+        logger.info(f"Medical ID saved for user {user.id}")
     else:
         await update.message.reply_text('لطفاً ابتدا نظرسنجی را تکمیل کنید.')
+        logger.warning(f"User {user.id} tried to submit medical ID before completing survey")
 
 # نمایش نتایج
 async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    admin_id = 130742264
     user = update.message.from_user
-    if user.id != admin_id:
+    if str(user.id) != ADMIN_ID:
         await update.message.reply_text('شما قبلاً در این نظرسنجی شرکت کرده‌اید.' if await check_completed(update, context) else 'فقط ادمین می‌تونه نتایج رو ببینه!')
+        logger.warning(f"User {user.id} attempted to access results without admin privileges")
         return
 
-    cursor.execute('SELECT * FROM responses')
-    rows = cursor.fetchall()
-    if not rows:
-        await update.message.reply_text("هیچ پاسخی ثبت نشده.")
-        return
+    async with await get_db() as db:
+        async with db.execute('SELECT * FROM responses') as cursor:
+            rows = await cursor.fetchall()
+            if not rows:
+                await update.message.reply_text("هیچ پاسخی ثبت نشده.")
+                return
 
-    response_text = "نتایج نظرسنجی:\n"
-    for row in rows:
-        response_text += f"کاربر: @{row[1]} (ID: {row[0]})\n"
-        for i in range(1, 11):
-            response_text += f"سوال {i}: {row[i+1]}\n"
-        response_text += f"شماره نظام پزشکی: {row[12]}\n\n"
-        if len(response_text) > 3000:
-            await update.message.reply_text(response_text)
-            response_text = ""
+            response_text = "نتایج نظرسنجی:\n"
+            for row in rows:
+                response_text += f"کاربر: @{row['username']} (ID: {row['user_id']})\n"
+                for i in range(1, 11):
+                    response_text += f"سوال {i}: {row[f'q{i}']}\n"
+                response_text += f"شماره نظام پزشکی: {row['medical_id']}\n\n"
+                if len(response_text) > 3000:
+                    await update.message.reply_text(response_text)
+                    response_text = ""
 
-    if response_text:
-        await update.message.reply_text(response_text)
+            if response_text:
+                await update.message.reply_text(response_text)
 
 # وب‌هوک
 async def webhook(request):
@@ -202,6 +247,9 @@ async def main():
         logger.error("No TOKEN provided")
         return
 
+    # مقداردهی اولیه دیتابیس
+    await init_db()
+
     app = Application.builder().token(TOKEN).updater(None).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -219,17 +267,4 @@ async def main():
     await site.start()
 
     try:
-        await app.bot.delete_webhook(drop_pending_updates=True)
-        await app.bot.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-    except Exception as e:
-        logger.error(f"Failed to set webhook: {e}")
-        return
-
-    await app.initialize()
-    await app.start()
-    logger.info(f"Bot started on port {PORT}")
-
-if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+        await app.bot
