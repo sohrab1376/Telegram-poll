@@ -136,17 +136,16 @@ async def get_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    message = "نتایج ثبت‌شده:"
-message = ""
+    message = "نتایج ثبت‌شده:\n"
 
-for uid, info in data.items():
-    username = info.get("username", "نامشخص")
-    medical_number = info.get("medical_number", "نامشخص")
-    message += f"کاربر: {username} | ID: {uid} | نظام پزشکی: {medical_number}\n"
+    for uid, info in data.items():
+        username = info.get("username", "نامشخص")
+        medical_number = info.get("medical_number", "نامشخص")
+        message += f"کاربر: {username} | ID: {uid} | نظام پزشکی: {medical_number}\n"
 
-    for i, a in enumerate(info.get("answers", {}).values()):
-        message += f"سوال {i+1}: {a}\n"
-    message += "------\n"
+        for i, a in enumerate(info.get("answers", {}).values()):
+            message += f"سوال {i+1}: {a}\n"
+        message += "------\n"
 
     await update.message.reply_text(message)
 
@@ -156,7 +155,7 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("results", get_results))
+    app.add_handler(CommandHandler("results", get_results))  # اصلاح شده
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(CallbackQueryHandler(final_submit, pattern="final_submit"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_number))
