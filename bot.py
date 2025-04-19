@@ -25,6 +25,13 @@ TOKEN = os.getenv('TOKEN')
 PORT = int(os.getenv('PORT', '10000'))
 WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 
+# تابع برای تبدیل اعداد فارسی به انگلیسی
+def persian_to_english_numbers(text):
+    persian_numbers = '۰۱۲۳۴۵۶۷۸۹'
+    english_numbers = '0123456789'
+    translation_table = str.maketrans(persian_numbers, english_numbers)
+    return text.translate(translation_table)
+
 # اتصال به دیتابیس
 conn = sqlite3.connect('survey.db', check_same_thread=False)
 cursor = conn.cursor()
@@ -197,8 +204,11 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         attempts = context.user_data['medical_id_attempts']
         logger.info(f"Attempt {attempts} for medical ID by user {user.id}")
 
+        # تبدیل اعداد فارسی به انگلیسی
+        medical_id_english = persian_to_english_numbers(medical_id)
+
         # جستجوی شماره نظام پزشکی در گوگل
-        query = f"{medical_id} site:irimc.org"
+        query = f"{medical_id_english} site:irimc.org"
         doctor_name = "نامشخص"  # مقدار پیش‌فرض برای نام پزشک
         is_valid = False
         try:
