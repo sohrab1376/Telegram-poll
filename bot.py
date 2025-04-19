@@ -212,6 +212,20 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             ))
             conn.commit()
             logger.info(f"Saved all responses and medical ID for user {user.id}")
+
+            # ارسال نتایج به ادمین
+            admin_id = 130742264  # ID ادمین
+            result_message = f"نظرسنجی جدید تکمیل شد:\nکاربر: @{user.username} (ID: {user.id})\n"
+            for i in range(1, 11):
+                result_message += f"سوال {i}: {responses.get(f'q{i}')}\n"
+            result_message += f"شماره نظام پزشکی: {medical_id}"
+            
+            try:
+                await context.bot.send_message(chat_id=admin_id, text=result_message)
+                logger.info(f"Sent survey results to admin for user {user.id}")
+            except Exception as e:
+                logger.error(f"Failed to send results to admin for user {user.id}: {e}")
+
             await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
             # پاک کردن پاسخ‌های موقت
             context.user_data['responses'] = {}
