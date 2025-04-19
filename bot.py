@@ -13,6 +13,8 @@ from telegram.ext import (
 import sqlite3
 from aiohttp import web
 from googlesearch import search  # برای جستجوی گوگل
+import requests  # برای درخواست HTTP
+from bs4 import BeautifulSoup  # برای پارس HTML
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -66,7 +68,7 @@ QUESTIONS = [
     "سوال 10_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده؟"
 ]
 
-# گزینه‌های هر سوال (خط 73 اصلاح‌شده)
+# گزینه‌های هر سوال
 OPTIONS = [
     [("بله", "yes"), ("خیر", "no")],
     [("بله", "yes"), ("خیر", "no")],
@@ -195,24 +197,41 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         attempts = context.user_data['medical_id_attempts']
         logger.info(f"Attempt {attempts} for medical ID by user {user.id}")
 
-        # جستجوی شماره نظام پزشکی در گوگل
+        # جستجوی شماره نظام پزشکی در گوگل و استخراج عنوان
         query = f"{medical_id} site:irimc.org"
+        doctor_name = "نامشخص"  # مقدار پیش‌فرض برای نام پزشک
+        is_valid = False
         try:
             search_results = list(search(query, num_results=1))
-            if search_results and "membersearch.irimc.org" in search_results[0]:
-                is_valid = True
+            if search_results:
+                first_result_url = search_results[0]
+                # درخواست HTTP برای گرفتن صفحه و استخراج عنوان
+                response = requests.get(first_result_url, timeout=5)
+                soup = BeautifulSoup(response.text, 'html.parser')
+                title = soup.title.string if soup.title else ""
+                logger.info(f"Title for medical ID {medical_id}: {title}")
+
+                # بررسی اینکه آیا عنوان شامل "دکتر" است
+                if "دکتر" in title:
+                    is_valid = True
+                    # استخراج نام پزشک (بعد از "دکتر" تا آخر عنوان)
+                    doctor_name = title.split("دکتر")[-1].strip()
+                    # حذف اطلاعات اضافی (مثل " - سازمان نظام پزشکی" اگر وجود داشته باشه)
+                    if " - " in doctor_name:
+                        doctor_name = doctor_name.split(" - ")[0].strip()
+                else:
+                    logger.info(f"No 'دکتر' found in title for medical ID {medical_id} for user {user.id}")
             else:
-                is_valid = False
-                logger.info(f"No valid search results found for medical ID {medical_id} for user {user.id}")
+                logger.info(f"No search results found for medical ID {medical_id} for user {user.id}")
         except Exception as e:
-            logger.error(f"Error searching medical ID {medical_id} for user {user.id}: {e}")
+            logger.error(f"Error searching or parsing medical ID {medical_id} for user {user.id}: {e}")
             is_valid = False
 
         if not is_valid:
             if attempts < 3:
                 remaining_attempts = 3 - attempts
                 await update.message.reply_text(
-                    f'شماره نظام پزشکی واردشده معتبر نیست یا با نام دکتری مرتبط نیست. '
+                    f'شماره نظام پزشکی وارد شده معتبر نیست. '
                     f'لطفاً دوباره بررسی کنید. ({remaining_attempts} فرصت باقی‌مانده)'
                 )
                 return
@@ -245,9 +264,10 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             conn.commit()
             logger.info(f"Saved all responses and medical ID for user {user.id}")
 
-            # ارسال نتایج به ادمین
+            # ارسال نتایج به ادمین با نام پزشک
             admin_id = 130742264
             result_message = f"نظرسنجی جدید تکمیل شد:\nکاربر: @{user.username} (ID: {user.id})\n"
+            result_message += f"نام پزشک: دکتر {doctor_name}\n"
             for i in range(1, 11):
                 result_message += f"سوال {i}: {responses.get(f'q{i}')}\n"
             result_message += f"شماره نظام پزشکی: {medical_id}"
