@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
+from googlesearch import search  # برای جستجوی گوگل
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -51,7 +52,7 @@ except sqlite3.OperationalError:
     pass
 conn.commit()
 
-# لیست سوالات (با علامت سوال)
+# لیست سوالات
 QUESTIONS = [
     "سوال 1_همکار گرامی آیا با روند پرداختی های فعلی دستیابی به اهداف کوتاه مدت و بلند مدت زندگی خود را در شان یک پزشک ممکن میدانید؟",
     "سوال 2_همکار گرامی آیا روند کنونی پرداختی های درمانگاه ها را نامناسب میدانید و برای اصلاح آن حاضر به همکاری هستید؟",
@@ -65,11 +66,11 @@ QUESTIONS = [
     "سوال 10_همکار گرامی آیا مسائل و مشکلات زندگی و یا سایر دلایل شما را مجبور به پر کردن شیفت ها تحت هر شرایطی کرده؟"
 ]
 
-# گزینه‌های هر سوال (نمایش فارسی، callback_data لاتین)
+# گزینه‌های هر سوال
 OPTIONS = [
     [("بله", "yes"), ("خیر", "no")],
     [("بله", "yes"), ("خیر", "no")],
-    [("طرح اجباری", "opt1"), ("خدمت اجباری", "opt2"), ("هنوز طرح یا خدمت اجباری را شروع نکردم", "opt3"), ("طرح یا خدمت اجباری را قبلا سپری کردم", "opt4")],
+    [("طرح اجباری", "opt1"), ("خدمت اجباری", "opt2"), ("هنوز طرح یا خدمت اجباری را شروع نکردم", "opt3"), ("طرح یا خدمت اجباری را قبلا سپری کردم "opt4")],
     [("بله", "yes"), ("خیر", "no")],
     [("درمانگاه خصوصی کمتر از 10 شیفت", "opt1"), ("درمانگاه خصوصی بیشتر از 10 شیفت", "opt2"), ("سایر مراکز کمتر از 10 شیفت", "opt3"), ("سایر مراکز بیشتر از 10 شیفت", "opt4"), ("خیر", "opt5")],
     [("بله", "yes"), ("خير", "no")],
@@ -94,10 +95,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
     user = update.message.from_user
-    # آماده‌سازی برای ذخیره موقت پاسخ‌ها
-    context.user_data['responses'] = {}  # دیکشنری برای ذخیره پاسخ‌ها
+    context.user_data['responses'] = {}
     context.user_data['question_index'] = 0
     context.user_data['last_message_id'] = None
+    context.user_data['medical_id_attempts'] = 0  # مقداردهی اولیه تعداد تلاش‌ها
     logger.info(f"Started survey for user {user.id}")
     await ask_question(update, context)
 
@@ -114,12 +115,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         keyboard = [[InlineKeyboardButton(text, callback_data=f"{index}_{data}")] for text, data in options]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
-            # ارسال سوال جدید
             if update.message:
                 message = await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 message = await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
-            # ذخیره message_id سوال فعلی
             context.user_data['last_message_id'] = message.message_id
             logger.info(f"Sent question {index} to user {user.id} with callback_data: {[f'{index}_{data}' for _, data in options]}, message_id: {message.message_id}")
         except Exception as e:
@@ -127,7 +126,6 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
-        # حذف سوال آخر
         try:
             if context.user_data.get('last_message_id'):
                 await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
@@ -151,7 +149,6 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         answer = data[1]
         logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
-        # تبدیل callback_data به متن نمایش
         for text, cb_data in OPTIONS[index]:
             if cb_data == answer:
                 answer_text = text
@@ -161,11 +158,9 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(f"گزینه انتخاب‌شده برای سوال {index+1} نامعتبر است. لطفاً یکی از گزینه‌های نمایش‌داده‌شده را انتخاب کنید.")
             return
 
-        # ذخیره موقت پاسخ تو context.user_data
         context.user_data['responses'][f'q{index+1}'] = answer_text
         logger.info(f"Temporarily saved response for question {index} for user {user.id}: {answer_text}")
 
-        # حذف پیام سوال قبلی
         try:
             if context.user_data.get('last_message_id'):
                 await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
@@ -182,21 +177,58 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Error in handle_response for user {user.id}: {e}")
         await query.message.reply_text("خطایی رخ داد. لطفاً دوباره سعی کنید.")
 
-# دریافت شماره نظام پزشکی و ذخیره پاسخ‌ها
+# دریافت شماره نظام پزشکی و تأیید با فرصت‌های اضافی
 async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.message.from_user
     if await check_completed(update, context):
         return
     if context.user_data.get('question_index', 0) == len(QUESTIONS):
-        medical_id = update.message.text
+        medical_id = update.message.text.strip()
         responses = context.user_data.get('responses', {})
 
-        # مطمئن شو همه سوالات جواب داده شدن
         if len(responses) != len(QUESTIONS):
             await update.message.reply_text('لطفاً همه سوالات را پاسخ دهید.')
             return
 
-        # ذخیره همه پاسخ‌ها تو دیتابیس
+        # افزایش تعداد تلاش‌ها
+        context.user_data['medical_id_attempts'] = context.user_data.get('medical_id_attempts', 0) + 1
+        attempts = context.user_data['medical_id_attempts']
+        logger.info(f"Attempt {attempts} for medical ID by user {user.id}")
+
+        # جستجوی شماره نظام پزشکی در گوگل
+        query = f"{medical_id} site:irimc.org"
+        try:
+            search_results = list(search(query, num_results=1))
+            if search_results and "membersearch.irimc.org" in search_results[0]:
+                is_valid = True
+            else:
+                is_valid = False
+                logger.info(f"No valid search results found for medical ID {medical_id} for user {user.id}")
+        except Exception as e:
+            logger.error(f"Error searching medical ID {medical_id} for user {user.id}: {e}")
+            is_valid = False
+
+        if not is_valid:
+            if attempts < 3:
+                remaining_attempts = 3 - attempts
+                await update.message.reply_text(
+                    f'شماره نظام پزشکی واردشده معتبر نیست یا با نام دکتری مرتبط نیست. '
+                    f'لطفاً دوباره بررسی کنید. ({remaining_attempts} فرصت باقی‌مانده)'
+                )
+                return
+            else:
+                # بعد از 3 تلاش ناموفق، نظرسنجی کنسل می‌شه
+                await update.message.reply_text(
+                    'شما 3 بار شماره نظام پزشکی نامعتبر وارد کردید. نظرسنجی کنسل شد. '
+                    'لطفاً با دستور /start دوباره شروع کنید.'
+                )
+                context.user_data['responses'] = {}
+                context.user_data['question_index'] = 0
+                context.user_data['medical_id_attempts'] = 0
+                logger.info(f"Survey cancelled for user {user.id} after 3 invalid medical ID attempts")
+                return
+
+        # اگر شماره معتبر بود، ذخیره پاسخ‌ها
         try:
             cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
             cursor.execute('''
@@ -214,12 +246,12 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             logger.info(f"Saved all responses and medical ID for user {user.id}")
 
             # ارسال نتایج به ادمین
-            admin_id = 130742264  # ID ادمین
+            admin_id = 130742264
             result_message = f"نظرسنجی جدید تکمیل شد:\nکاربر: @{user.username} (ID: {user.id})\n"
             for i in range(1, 11):
                 result_message += f"سوال {i}: {responses.get(f'q{i}')}\n"
             result_message += f"شماره نظام پزشکی: {medical_id}"
-            
+
             try:
                 await context.bot.send_message(chat_id=admin_id, text=result_message)
                 logger.info(f"Sent survey results to admin for user {user.id}")
@@ -227,8 +259,8 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 logger.error(f"Failed to send results to admin for user {user.id}: {e}")
 
             await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
-            # پاک کردن پاسخ‌های موقت
             context.user_data['responses'] = {}
+            context.user_data['medical_id_attempts'] = 0  # ریست تعداد تلاش‌ها
         except Exception as e:
             logger.error(f"Error saving responses for user {user.id}: {e}")
             await update.message.reply_text('خطایی در ثبت پاسخ‌ها رخ داد. لطفاً دوباره سعی کنید.')
