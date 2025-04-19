@@ -12,7 +12,6 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
-from googlesearch import search  # برای جستجوی گوگل
 import requests  # برای درخواست HTTP
 from bs4 import BeautifulSoup  # برای پارس HTML
 
@@ -197,34 +196,38 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         attempts = context.user_data['medical_id_attempts']
         logger.info(f"Attempt {attempts} for medical ID by user {user.id}")
 
-        # جستجوی شماره نظام پزشکی در گوگل و استخراج عنوان
+        # جستجوی شماره نظام پزشکی در گوگل و استخراج عنوان از نتایج جستجو
         query = f"{medical_id} site:irimc.org"
         doctor_name = "نامشخص"  # مقدار پیش‌فرض برای نام پزشک
         is_valid = False
         try:
-            search_results = list(search(query, num_results=1))
-            if search_results:
-                first_result_url = search_results[0]
-                # درخواست HTTP برای گرفتن صفحه و استخراج عنوان
-                response = requests.get(first_result_url, timeout=5)
-                soup = BeautifulSoup(response.text, 'html.parser')
-                title = soup.title.string if soup.title else ""
-                logger.info(f"Title for medical ID {medical_id}: {title}")
+            # درخواست به صفحه نتایج گوگل
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            google_url = f"https://www.google.com/search?q={query}"
+            response = requests.get(google_url, headers=headers, timeout=5)
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # پیدا کردن اولین نتیجه (عنوان آبی رنگ)
+            first_result = soup.find('h3')  # اولین عنوان نتیجه جستجو
+            if first_result:
+                title = first_result.get_text()
+                logger.info(f"Google search result title for medical ID {medical_id}: {title}")
 
                 # بررسی اینکه آیا عنوان شامل "دکتر" است
                 if "دکتر" in title:
                     is_valid = True
-                    # استخراج نام پزشک (بعد از "دکتر" تا آخر عنوان)
+                    # استخراج نام پزشک (بعد از "دکتر" تا قبل از اطلاعات اضافی)
                     doctor_name = title.split("دکتر")[-1].strip()
-                    # حذف اطلاعات اضافی (مثل " - سازمان نظام پزشکی" اگر وجود داشته باشه)
                     if " - " in doctor_name:
                         doctor_name = doctor_name.split(" - ")[0].strip()
                 else:
-                    logger.info(f"No 'دکتر' found in title for medical ID {medical_id} for user {user.id}")
+                    logger.info(f"No 'دکتر' found in Google search result title for medical ID {medical_id} for user {user.id}")
             else:
                 logger.info(f"No search results found for medical ID {medical_id} for user {user.id}")
         except Exception as e:
-            logger.error(f"Error searching or parsing medical ID {medical_id} for user {user.id}: {e}")
+            logger.error(f"Error searching or parsing Google results for medical ID {medical_id} for user {user.id}: {e}")
             is_valid = False
 
         if not is_valid:
