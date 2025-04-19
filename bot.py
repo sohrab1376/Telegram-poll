@@ -205,31 +205,31 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # گرفتن URL اولین نتیجه با googlesearch-python
             search_results = list(search(query, num_results=1))
             if search_results and "membersearch.irimc.org" in search_results[0]:
-                # درخواست به صفحه نتایج گوگل برای گرفتن عنوان
+                is_valid = True  # شماره معتبر است چون URL از سایت نظام پزشکی است
+                # حالا اطلاعات پزشک رو از صفحه membersearch.irimc.org استخراج می‌کنیم
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
                 }
-                google_url = f"https://www.google.com/search?q={query}"
-                response = requests.get(google_url, headers=headers, timeout=5)
+                response = requests.get(search_results[0], headers=headers, timeout=5)
                 soup = BeautifulSoup(response.text, 'html.parser')
 
-                # پیدا کردن اولین نتیجه (عنوان آبی رنگ)
-                first_result = soup.find('h3')  # اولین عنوان نتیجه جستجو
-                if first_result:
-                    title = first_result.get_text()
-                    logger.info(f"Google search result title for medical ID {medical_id}: {title}")
-
-                    # بررسی اینکه آیا عنوان شامل "دکتر" است
-                    if "دکتر" in title:
-                        is_valid = True
-                        # استخراج نام پزشک (بعد از "دکتر" تا قبل از اطلاعات اضافی)
-                        doctor_name = title.split("دکتر")[-1].strip()
-                        if " - " in doctor_name:
-                            doctor_name = doctor_name.split(" - ")[0].strip()
-                    else:
-                        logger.info(f"No 'دکتر' found in Google search result title for medical ID {medical_id} for user {user.id}")
+                # پیدا کردن نام پزشک از صفحه نظام پزشکی
+                # معمولاً نام پزشک توی تگ <h1> یا تگ‌های مشابه هست
+                name_tag = soup.find('h1')  # فرض می‌کنیم نام توی تگ h1 هست
+                if name_tag and "دکتر" in name_tag.get_text():
+                    doctor_name = name_tag.get_text().split("دکتر")[-1].strip()
+                    if " - " in doctor_name:
+                        doctor_name = doctor_name.split(" - ")[0].strip()
                 else:
-                    logger.info(f"No search results found for medical ID {medical_id} for user {user.id}")
+                    # اگه تگ h1 نبود، دنبال تگ‌های دیگه می‌گردیم
+                    possible_name_tags = soup.find_all(['h1', 'h2', 'h3', 'p'])
+                    for tag in possible_name_tags:
+                        text = tag.get_text()
+                        if "دکتر" in text:
+                            doctor_name = text.split("دکتر")[-1].strip()
+                            if " - " in doctor_name:
+                                doctor_name = doctor_name.split(" - ")[0].strip()
+                            break
             else:
                 logger.info(f"No valid search results found for medical ID {medical_id} for user {user.id}")
         except Exception as e:
