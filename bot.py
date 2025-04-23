@@ -18,8 +18,8 @@ import asyncio
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# خواندن توکن و پورت
-TOKEN = os.getenv('TOKEN')
+# توکن ربات
+TOKEN = "8011278275:AAG10h1SZbTyA-aMDACVD3TelAmXSG7AyYo"
 PORT = int(os.getenv('PORT', '10000'))
 WEBHOOK_URL = "https://telegram-poll.onrender.com/"
 
@@ -287,6 +287,14 @@ async def add_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text('فقط ادمین می‌تونه این دستور رو اجرا کنه!')
         return
 
+    # چک کردن اینکه دستور در حال اجرا نیست
+    if context.bot_data.get('add_members_running', False):
+        await update.message.reply_text('دستور در حال اجراست، لطفاً صبر کنید تا فرآیند فعلی تمام شود.')
+        return
+
+    # تنظیم پرچم برای جلوگیری از اجرای همزمان
+    context.bot_data['add_members_running'] = True
+
     GROUP_INVITE_LINK = "https://t.me/+E6vJ1Y537-ljOGU0"
     INVITE_MESSAGE = "سلام همکار گرامی!\nبه دلیل محدودیت‌های حریم خصوصی، به صورت خودکار به گروه اضافه نشدید. احتراما با استفاده از لینک زیر به گروه 'پزشکان خوزستان(تایید شده)' بپیوندید:\n{GROUP_INVITE_LINK}\nبا تشکر!"
     USER_IDS = [
@@ -317,11 +325,12 @@ async def add_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         60611363, 207095500, 176873105, 392946123
     ]
 
-    chat_id = -1002548262598  # آی‌دی گروه که ازت گرفتم
+    chat_id = -1002548262598  # آی‌دی گروه
     success_count = 0
     failed_count = 0
 
     try:
+        await update.message.reply_text('شروع فرآیند اضافه کردن اعضا...')
         for user_id in USER_IDS:
             try:
                 await context.bot.add_chat_member(chat_id=chat_id, user_id=user_id)
@@ -336,53 +345,20 @@ async def add_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     logger.info(f"Sent invite link to user {user_id}")
                 except Exception as e:
                     logger.error(f"Failed to send invite link to user {user_id}: {e}")
-            await asyncio.sleep(1)  # تاخیر ۱ ثانیه‌ای بین هر ادد کردن برای جلوگیری از محدودیت تلگرام
-        await update.message.reply_text(f"عملیات تکمیل شد. {success_count} نفر با موفقیت اضافه شدند، {failed_count} نفر به دلیل محدودیت‌های حریم خصوصی نیاز به لینک دعوت دارند.")
+            await asyncio.sleep(1)  # تاخیر ۱ ثانیه‌ای برای جلوگیری از محدودیت تلگرام
+
+        result_message = (
+            f"عملیات تکمیل شد:\n"
+            f"- {success_count} نفر با موفقیت اضافه شدند.\n"
+            f"- {failed_count} نفر به دلیل محدودیت‌های حریم خصوصی نیاز به لینک دعوت دارند."
+        )
+        await update.message.reply_text(result_message)
     except Exception as e:
         logger.error(f"Error in add_members: {e}")
         await update.message.reply_text("خطایی در فرآیند اضافه کردن اعضا رخ داد.")
-
-# تابع دریافت لیست اعضای گروه
-async def get_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    admin_id = 130742264
-    user = update.message.from_user
-    if user.id != admin_id:
-        await update.message.reply_text('فقط ادمین می‌تونه این دستور رو اجرا کنه!')
-        return
-
-    chat_id = -1002548262598  # آی‌دی گروه که ازت گرفتم
-    try:
-        # گرفتن تعداد کل اعضا
-        member_count = await context.bot.get_chat_member_count(chat_id=chat_id)
-        response_text = f"تعداد کل اعضای گروه: {member_count}\n\nلیست آی‌دی‌ها:\n"
-
-        # گرفتن لیست اعضا با استفاده از offset
-        offset = 0
-        limit = 200  # حداکثر تعداد در هر درخواست
-        all_members = []
-        while True:
-            members = await context.bot.get_chat_members(chat_id=chat_id, offset=offset)
-            if not members:
-                break
-            all_members.extend(members)
-            offset += len(members)
-            if len(members) < limit:
-                break
-
-        # ساخت لیست آی‌دی‌ها
-        for member in all_members:
-            user_id = member.user.id
-            username = member.user.username if member.user.username else f"User_{user_id}"
-            response_text += f"ID: {user_id} - @{username}\n"
-            if len(response_text) > 3000:
-                await update.message.reply_text(response_text)
-                response_text = ""
-
-        if response_text:
-            await update.message.reply_text(response_text)
-    except Exception as e:
-        logger.error(f"Error in get_members: {e}")
-        await update.message.reply_text("خطایی در دریافت لیست اعضای گروه رخ داد.")
+    finally:
+        # ریست کردن پرچم بعد از اتمام
+        context.bot_data['add_members_running'] = False
 
 # وب‌هوک
 async def webhook(request):
@@ -410,7 +386,6 @@ async def main():
     app.add_handler(CommandHandler("results", results))
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("addmembers", add_members))
-    app.add_handler(CommandHandler("getmembers", get_members))
 
     web_app = web.Application()
     web_app['telegram_app'] = app
