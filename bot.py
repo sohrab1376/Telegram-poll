@@ -1,5 +1,4 @@
 
-
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,6 +12,7 @@ from telegram.ext import (
 )
 import sqlite3
 from aiohttp import web
+import asyncio
 
 # تنظیمات لاگ
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -95,8 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await check_completed(update, context):
         return
     user = update.message.from_user
-    # آماده‌سازی برای ذخیره موقت پاسخ‌ها
-    context.user_data['responses'] = {}  # دیکشنری برای ذخیره پاسخ‌ها
+    context.user_data['responses'] = {}
     context.user_data['question_index'] = 0
     context.user_data['last_message_id'] = None
     logger.info(f"Started survey for user {user.id}")
@@ -115,12 +114,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         keyboard = [[InlineKeyboardButton(text, callback_data=f"{index}_{data}")] for text, data in options]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
-            # ارسال سوال جدید
             if update.message:
                 message = await update.message.reply_text(question, reply_markup=reply_markup)
             else:
                 message = await update.callback_query.message.reply_text(question, reply_markup=reply_markup)
-            # ذخیره message_id سوال فعلی
             context.user_data['last_message_id'] = message.message_id
             logger.info(f"Sent question {index} to user {user.id} with callback_data: {[f'{index}_{data}' for _, data in options]}, message_id: {message.message_id}")
         except Exception as e:
@@ -128,7 +125,6 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await (update.message or update.callback_query.message).reply_text("خطایی در ارسال سوال رخ داد. لطفاً دوباره سعی کنید.")
     else:
         logger.info(f"Reached end of questions for user {user.id}, asking for medical ID")
-        # حذف سوال آخر
         try:
             if context.user_data.get('last_message_id'):
                 await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
@@ -152,7 +148,6 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         answer = data[1]
         logger.info(f"Received response for question {index} from user {user.id}: {answer}")
 
-        # تبدیل callback_data به متن نمایش
         for text, cb_data in OPTIONS[index]:
             if cb_data == answer:
                 answer_text = text
@@ -162,11 +157,9 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(f"گزینه انتخاب‌شده برای سوال {index+1} نامعتبر است. لطفاً یکی از گزینه‌های نمایش‌داده‌شده را انتخاب کنید.")
             return
 
-        # ذخیره موقت پاسخ تو context.user_data
         context.user_data['responses'][f'q{index+1}'] = answer_text
         logger.info(f"Temporarily saved response for question {index} for user {user.id}: {answer_text}")
 
-        # حذف پیام سوال قبلی
         try:
             if context.user_data.get('last_message_id'):
                 await context.bot.delete_message(chat_id=user.id, message_id=context.user_data['last_message_id'])
@@ -192,12 +185,10 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         medical_id = update.message.text
         responses = context.user_data.get('responses', {})
 
-        # مطمئن شو همه سوالات جواب داده شدن
         if len(responses) != len(QUESTIONS):
             await update.message.reply_text('لطفاً همه سوالات را پاسخ دهید.')
             return
 
-        # ذخیره همه پاسخ‌ها تو دیتابیس
         try:
             cursor.execute('INSERT OR IGNORE INTO responses (user_id, username) VALUES (?, ?)', (user.id, user.username))
             cursor.execute('''
@@ -214,8 +205,7 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             conn.commit()
             logger.info(f"Saved all responses and medical ID for user {user.id}")
 
-            # ارسال نتایج به ادمین
-            admin_id = 130742264  # ID ادمین
+            admin_id = 130742264
             result_message = f"نظرسنجی جدید تکمیل شد:\nکاربر: @{user.username} (ID: {user.id})\n"
             for i in range(1, 11):
                 result_message += f"سوال {i}: {responses.get(f'q{i}')}\n"
@@ -228,7 +218,6 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 logger.error(f"Failed to send results to admin for user {user.id}: {e}")
 
             await update.message.reply_text('نظرات شما ثبت شد، با تشکر از همکاری شما')
-            # پاک کردن پاسخ‌های موقت
             context.user_data['responses'] = {}
         except Exception as e:
             logger.error(f"Error saving responses for user {user.id}: {e}")
@@ -290,6 +279,95 @@ async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if response_text:
         await update.message.reply_text(response_text)
 
+# تابع اضافه کردن اعضا به گروه
+async def add_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = 130742264
+    user = update.message.from_user
+    if user.id != admin_id:
+        await update.message.reply_text('فقط ادمین می‌تونه این دستور رو اجرا کنه!')
+        return
+
+    GROUP_INVITE_LINK = "https://t.me/+E6vJ1Y537-ljOGU0"
+    INVITE_MESSAGE = "سلام همکار گرامی!\nبه دلیل محدودیت‌های حریم خصوصی، به صورت خودکار به گروه اضافه نشدید. احتراما با استفاده از لینک زیر به گروه 'پزشکان خوزستان(تایید شده)' بپیوندید:\n{GROUP_INVITE_LINK}\nبا تشکر!"
+    USER_IDS = [
+        40210485, 40603389, 41237512, 42274915, 45856546,
+        70548107, 74655024, 74706805, 76974160, 82322616,
+        86217516, 88528693, 90406110, 90973458, 91796213,
+        93717917, 102016148, 102717046, 103041834, 107575794,
+        125988236, 126033025, 127204127, 128211362, 130742264,
+        141642888, 154577520, 156806669, 169145975, 171383552,
+        184281552, 201998730, 224679292, 237109372, 248095045,
+        248376711, 263571873, 268630776, 294024995, 308904499,
+        314796797, 347797102, 359578115, 375090950, 382719543,
+        386530940, 420286813, 421862790, 425425101, 437390703,
+        446998292, 489556505, 489760950, 630870805, 728780186,
+        743000210, 871370289, 1269929448, 1707766882, 1787580725,
+        1838813771, 5734586072, 5909606644, 6053140393, 6091891336,
+        6438754301, 6704827782, 7048291530, 95419818, 125991359,
+        378840533, 389958329, 429736122, 455688480, 102417629,
+        94070512, 5415129022, 363063803, 93314994, 876872032,
+        33059999, 397669064, 876872032, 44986829, 267908416,
+        71899260, 66252143, 172783172, 2025484113, 5136365966,
+        151156108, 440014443, 226393572, 108522377, 322740548,
+        279913071, 133636003, 766873645, 144900576, 90541482,
+        124348276, 167757002, 1096968283, 674529726, 83203274,
+        743375673, 247422725, 613974131, 851620982, 152495225,
+        5432539473, 144013104, 154158526, 33187913, 39497007,
+        190063287, 610757050, 105547525, 457534629, 5789627096,
+        60611363, 207095500, 176873105, 392946123
+    ]
+
+    chat_id = -1002548262598  # آی‌دی گروه که ازت گرفتم
+    success_count = 0
+    failed_count = 0
+
+    try:
+        for user_id in USER_IDS:
+            try:
+                await context.bot.add_chat_member(chat_id=chat_id, user_id=user_id)
+                success_count += 1
+                logger.info(f"Successfully added user {user_id} to group")
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Failed to add user {user_id} to group: {e}")
+                invite_msg = INVITE_MESSAGE.format(GROUP_INVITE_LINK=GROUP_INVITE_LINK)
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=invite_msg)
+                    logger.info(f"Sent invite link to user {user_id}")
+                except Exception as e:
+                    logger.error(f"Failed to send invite link to user {user_id}: {e}")
+            await asyncio.sleep(1)  # تاخیر ۱ ثانیه‌ای بین هر ادد کردن برای جلوگیری از محدودیت تلگرام
+        await update.message.reply_text(f"عملیات تکمیل شد. {success_count} نفر با موفقیت اضافه شدند، {failed_count} نفر به دلیل محدودیت‌های حریم خصوصی نیاز به لینک دعوت دارند.")
+    except Exception as e:
+        logger.error(f"Error in add_members: {e}")
+        await update.message.reply_text("خطایی در فرآیند اضافه کردن اعضا رخ داد.")
+
+# تابع دریافت لیست اعضای گروه
+async def get_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admin_id = 130742264
+    user = update.message.from_user
+    if user.id != admin_id:
+        await update.message.reply_text('فقط ادمین می‌تونه این دستور رو اجرا کنه!')
+        return
+
+    chat_id = -1002548262598  # آی‌دی گروه که ازت گرفتم
+    try:
+        members = await context.bot.get_chat_members_count(chat_id=chat_id)
+        member_list = await context.bot.get_chat_members(chat_id=chat_id)
+        response_text = f"تعداد کل اعضای گروه: {members}\n\nلیست آی‌دی‌ها:\n"
+        for member in member_list:
+            user_id = member.user.id
+            username = member.user.username if member.user.username else f"User_{user_id}"
+            response_text += f"ID: {user_id} - @{username}\n"
+            if len(response_text) > 3000:
+                await update.message.reply_text(response_text)
+                response_text = ""
+        if response_text:
+            await update.message.reply_text(response_text)
+    except Exception as e:
+        logger.error(f"Error in get_members: {e}")
+        await update.message.reply_text("خطایی در دریافت لیست اعضای گروه رخ داد.")
+
 # وب‌هوک
 async def webhook(request):
     app = request.app['telegram_app']
@@ -315,6 +393,8 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_medical_id))
     app.add_handler(CommandHandler("results", results))
     app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("addmembers", add_members))
+    app.add_handler(CommandHandler("getmembers", get_members))
 
     web_app = web.Application()
     web_app['telegram_app'] = app
