@@ -352,16 +352,32 @@ async def get_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     chat_id = -1002548262598  # آی‌دی گروه که ازت گرفتم
     try:
-        members = await context.bot.get_chat_members_count(chat_id=chat_id)
-        member_list = await context.bot.get_chat_members(chat_id=chat_id)
-        response_text = f"تعداد کل اعضای گروه: {members}\n\nلیست آی‌دی‌ها:\n"
-        for member in member_list:
+        # گرفتن تعداد کل اعضا
+        member_count = await context.bot.get_chat_member_count(chat_id=chat_id)
+        response_text = f"تعداد کل اعضای گروه: {member_count}\n\nلیست آی‌دی‌ها:\n"
+
+        # گرفتن لیست اعضا با استفاده از offset
+        offset = 0
+        limit = 200  # حداکثر تعداد در هر درخواست
+        all_members = []
+        while True:
+            members = await context.bot.get_chat_members(chat_id=chat_id, offset=offset)
+            if not members:
+                break
+            all_members.extend(members)
+            offset += len(members)
+            if len(members) < limit:
+                break
+
+        # ساخت لیست آی‌دی‌ها
+        for member in all_members:
             user_id = member.user.id
             username = member.user.username if member.user.username else f"User_{user_id}"
             response_text += f"ID: {user_id} - @{username}\n"
             if len(response_text) > 3000:
                 await update.message.reply_text(response_text)
                 response_text = ""
+
         if response_text:
             await update.message.reply_text(response_text)
     except Exception as e:
