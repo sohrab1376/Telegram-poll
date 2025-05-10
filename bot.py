@@ -231,7 +231,7 @@ async def handle_medical_id(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "با سلام. پزشک محترم،\n"
                 "از شما دعوت می‌کنیم به گروه «پزشکان خوزستان (تایید شده)» بپیوندید. این گروه بستری برای تبادل نظر بین همکارانی است که در نظرسنجی شرکت کرده اند.\n"
                 "لطفاً از طریق لینک زیر به ما ملحق شوید:\n"
-                "https://t.me/+E6vJ1Y537-ljOGU0\n"
+                "https://t.me/+nAt8IswRVV1iODQ0\n"
                 "با سپاس"
             )
             await update.message.reply_text(invite_message)
